@@ -13,6 +13,8 @@ env:
   PYTHON_VERSION: "{{ python_version }}"
   # 使用shell命令定义日期
   RUN_DATE: {% raw %}${{ github.event.inputs.date || '' }}{% endraw %}
+  # 添加黑猫投诉Cookie环境变量
+  HEIMAO_COOKIE: {% raw %}${{ secrets.HEIMAO_COOKIE }}{% endraw %}
 
 # 定义工作流的权限
 permissions:

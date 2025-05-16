@@ -19,7 +19,7 @@ on:
     types:
       - crawler_completed
 env:
-  PYTHON_VERSION: "3.10"
+  PYTHON_VERSION: '3.10'
   ANALYSIS_DIR: analysis/daily
 permissions:
   contents: write
@@ -160,11 +160,3 @@ jobs:
             git push
             echo "成功提交并推送分析结果和状态"
           fi
-
-      - name: 触发仪表盘更新工作流
-        uses: benc-uk/workflow-dispatch@v1
-        with:
-          workflow: update_dashboard.yml
-          token: ${{ secrets.GITHUB_TOKEN }}
-          inputs: '{"site_id": "${{ steps.params.outputs.site_id }}"}'
-        if: steps.run-analysis.outputs.analysis_exists == 'true'

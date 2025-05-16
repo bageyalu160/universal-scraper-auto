@@ -62,6 +62,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          HEIMAO_COOKIE: ${{ secrets.HEIMAO_COOKIE }}
           HEIMAO_KEYWORDS: ${{ vars.HEIMAO_KEYWORDS || '' }}
           ENABLE_NOTIFICATION: ${{ vars.ENABLE_NOTIFICATION || 'false' }}
           NOTIFICATION_TYPE: ${{ vars.NOTIFICATION_TYPE || 'none' }}
