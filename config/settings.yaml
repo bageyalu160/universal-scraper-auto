@@ -1,0 +1,157 @@
+# 通用爬虫框架全局设置
+
+# 基本设置
+general:
+  # 默认使用的网站配置
+  default_site: "pm001"
+
+  # 运行模式: "local" (本地运行) 或 "github" (GitHub Actions)
+  run_mode: "local"
+
+  # 数据存储目录
+  data_dir: "data"
+
+  # 分析结果目录
+  analysis_dir: "analysis"
+
+  # 状态文件目录
+  status_dir: ".status"
+
+# GitHub Actions配置
+github_actions:
+  # 是否启用GitHub Actions
+  enabled: true
+
+  # 工作流目录
+  workflow_dir: ".github/workflows"
+
+  # 爬虫工作流设置
+  crawler:
+    filename: "crawler.yml"
+    # 定时运行设置 (cron格式)
+    schedule: "0 22 * * *" # 每天UTC 22:00 (约北京时间次日6:00)
+
+  # 分析工作流设置
+  analyzer:
+    filename: "analyzer.yml"
+    # 自动触发分析 (爬虫成功后)
+    auto_trigger: true
+
+# AI分析配置
+analysis:
+  # 是否启用AI分析
+  enabled: true
+
+  # 使用的AI提供商: "gemini" (Google Gemini API) 或 "openai" (OpenAI API)
+  provider: "gemini"
+
+  # API配置
+  api:
+    # API基础URL
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+    # API密钥环境变量名
+    api_key_env: "GEMINI_API_KEY"
+
+    # 默认模型
+    model: "gemini-1.5-pro"
+
+    # 每个批次的最大记录数
+    batch_size: 100
+
+    # 最大重试次数
+    max_retry: 3
+
+    # 最大并发工作线程数
+    max_workers: 5
+
+  # 默认使用的提示词模板
+  default_prompt: "general_prompt.txt"
+
+  # 网站特定的提示词映射
+  site_prompts:
+    "pm001": "pm001_prompt.txt"
+
+# 全局信息
+global:
+  # 项目仓库URL
+  repo_url: "" # 为空时将自动从git配置或环境变量中检测
+
+# 通知配置
+notification:
+  # 是否启用通知
+  enabled: true
+
+  # 通知模板 - 支持的变量:
+  # {site_name} - 网站名称
+  # {total_records} - 总记录数
+  # {date_range_start} - 数据日期范围开始
+  # {date_range_end} - 数据日期范围结束
+  # {ai_analysis_title} - AI分析标题
+  # {ai_analysis_content} - AI分析内容
+  # {repo_url} - 仓库URL
+  template: |
+    ### {site_name}数据更新通知
+
+    **数据概览**:
+    - 总记录数: {total_records}
+    - 日期范围: {date_range_start} 至 {date_range_end}
+
+    **{ai_analysis_title}**:
+    {ai_analysis_content}
+
+    **查看完整数据**: [GitHub仓库]({repo_url})
+
+  # 数据字段映射配置
+  date_field: "date" # 日期字段名
+  ai_field: "analysis" # AI分析结果字段名
+  category_field: "类别" # 类别字段名
+
+  # 钉钉通知
+  dingtalk:
+    enabled: true
+    webhook_url: "" # 可选: 直接设置URL，或使用webhook_env环境变量
+    webhook_env: "DINGTALK_WEBHOOK_URL"
+    secret: "" # 可选: 签名密钥
+
+  # 飞书通知
+  feishu:
+    enabled: true
+    webhook_url: "" # 可选: 直接设置URL，或使用webhook_env环境变量
+    webhook_env: "FEISHU_WEBHOOK_URL"
+
+  # 企业微信通知
+  wechat:
+    enabled: true
+    webhook_url: "" # 可选: 直接设置URL，或使用webhook_env环境变量
+    webhook_env: "WECHAT_WORK_WEBHOOK_URL"
+
+  # Apprise通知配置
+  # 可以添加任何Apprise支持的通知服务，详细服务列表：https://github.com/caronc/apprise
+  # 常用服务示例:
+  # - "tgram://bot_token/chat_id"            # Telegram
+  # - "discord://webhook_id/webhook_token"   # Discord
+  # - "mailto://user:pass@gmail.com"         # 邮件
+  # - "slack://TokenA/TokenB/TokenC"         # Slack
+  # - "pushover://user@token"                # Pushover
+  # - "pushbullet://accesstoken"             # Pushbullet
+  # - "line://token"                         # Line
+  apprise_urls:
+    # - "tgram://bot_token/chat_id"  # 取消注释并填入正确的凭据以启用
+    # - "discord://webhook_id/webhook_token"
+    # - "mailto://user:pass@gmail.com"
+    # - "slack://TokenA/TokenB/TokenC"
+
+# 高级配置
+advanced:
+  # 调试模式
+  debug: false
+
+  # 超时设置 (秒)
+  timeout: 600
+
+  # 内存限制 (MB)
+  memory_limit: 512
+
+  # 临时文件清理
+  cleanup_temp_files: true

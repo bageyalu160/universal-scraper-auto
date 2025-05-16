@@ -1,0 +1,119 @@
+# Firecrawl示例配置
+# 演示如何配置Firecrawl爬虫和Extract功能
+
+# 基本站点信息
+site:
+  name: "Firecrawl示例"
+  description: "使用Firecrawl爬取和Extract功能"
+  base_url: "https://docs.firecrawl.dev/"
+  output_filename: "firecrawl_data.json"
+  encoding: "utf-8"
+
+# 爬取规则
+scraping:
+  # 爬取引擎设置
+  engine: "firecrawl" # 使用Firecrawl引擎
+
+  # Firecrawl特定配置选项
+  firecrawl_options:
+    formats: ["markdown", "html", "json", "screenshot"] # 输出格式
+    onlyMainContent: true # 只提取主要内容
+    enableWebSearch: true # 启用Web搜索增强抽取
+    includeSubdomains: false # 是否包含子域名
+    # 页面交互操作
+    actions:
+      - { type: "wait", milliseconds: 2000 } # 等待页面加载
+      - { type: "click", selector: "a[href='/features/extract']" } # 点击Extract链接
+      - { type: "wait", milliseconds: 1000 } # 等待页面加载
+      - { type: "scroll", direction: "down" } # 向下滚动
+      - { type: "wait", milliseconds: 1000 } # 等待页面加载
+      - { type: "screenshot" } # 截取屏幕截图
+      - { type: "scrape" } # 抓取当前页面内容
+
+  # Extract功能的提示词
+  extract_prompt: "提取这个网站上的所有API功能、参数及其描述，包括示例代码。特别关注Extract功能的用法。"
+
+  # 爬取的目标列表
+  targets:
+    - id: "features"
+      name: "特性文档"
+      url: "https://docs.firecrawl.dev/features/extract"
+    - id: "python"
+      name: "Python SDK"
+      url: "https://docs.firecrawl.dev/sdks/python"
+    - id: "main"
+      name: "主页"
+      url: "https://docs.firecrawl.dev/"
+
+  # 时间范围设置
+  time_range:
+    days_limit: 7 # 抓取最近几天的内容
+
+  # 分页设置
+  pagination:
+    pages_per_target: 3 # 每个目标抓取的页数
+    items_per_page: 20 # 每页项目数
+    max_items: 100 # 最大抓取项目数
+
+  # URL格式
+  url_format:
+    target_page: "{base_url}{target_id}/page/{page_num}"
+    item_detail: "{base_url}item/{item_id}"
+
+# 网络请求配置
+network:
+  # 重试设置
+  retry:
+    max_retries: 3
+    backoff_factor: 0.5
+    status_forcelist: [408, 429, 500, 502, 503, 504]
+
+  # 超时设置
+  timeout: 30 # 秒
+
+  # 延迟设置
+  delay:
+    page_delay:
+      min: 2 # 页面间最小延迟（秒）
+      max: 5 # 页面间最大延迟（秒）
+
+# 解析配置
+parsing:
+  # Extract提取架构
+  # 这里定义需要从网页中抽取的结构化数据字段
+  field_selectors:
+    api_name:
+      description: "API名称"
+    api_description:
+      description: "API功能描述"
+    parameters:
+      description: "API参数列表"
+    example_code:
+      description: "示例代码"
+    response_format:
+      description: "响应格式"
+
+# 输出配置
+output:
+  # 输出文件字段
+  fields:
+    [
+      "api_name",
+      "api_description",
+      "parameters",
+      "example_code",
+      "response_format",
+    ]
+
+  # 日志配置
+  logging:
+    filename: "firecrawl_scraper.log"
+    level: "INFO"
+    format: "%(asctime)s - %(levelname)s - %(message)s"
+
+# 过滤器配置
+filters:
+  # 关键词过滤
+  keywords:
+    include: ["extract", "api", "sdk"] # 必须包含的关键词
+    exclude: ["deprecated"] # 不能包含的关键词

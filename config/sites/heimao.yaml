@@ -1,0 +1,61 @@
+site_info:
+  name: "黑猫投诉"
+  base_url: "https://tousu.sina.com.cn"
+  description: "黑猫投诉数据采集"
+
+scraping:
+  engine: "custom" # 使用自定义引擎
+  custom_module: "src.scrapers.heimao_scraper"
+  custom_function: "scrape_heimao"
+  targets:
+    - type: "latest" # 不带关键词的默认搜索
+      limit: 10
+    - type: "keyword" # 带关键词的搜索
+      keywords: ["${HEIMAO_KEYWORDS}"] # 从环境变量获取关键词，多个关键词用逗号分隔
+  api:
+    type: "search" # 使用搜索API
+    base_url: "https://tousu.sina.com.cn/api/index/s"
+    page_size: 10
+    max_pages: 5
+  schedule: "0 9 * * *" # 每天早上9点执行
+  retry:
+    max_attempts: 3
+    delay: 5
+  anti_risk:
+    enable: true
+    sleep_min: 1.5
+    sleep_max: 3.0
+
+processing:
+  remove_html_tags: true # 移除HTML标签
+  extract_id_from_url: true # 从URL中提取ID
+  clean_text: true # 清理文本
+  convert_timestamp: true
+
+output:
+  format: "json"
+  filename: "heimao_data.json"
+  pretty_print: true
+  save_raw_data: false # 是否保存原始数据
+  fields:
+    - id
+    - title
+    - company
+    - content
+    - url
+    - timestamp
+    - status
+    - issue
+    - appeal
+    - cost
+    - crawled_at
+
+notification:
+  enabled: ${ENABLE_NOTIFICATION:-false}
+  channels:
+    - type: "${NOTIFICATION_TYPE:-none}" # 钉钉、飞书或企业微信
+      webhook: "${NOTIFICATION_WEBHOOK}"
+
+auth:
+  cookie_env: "HEIMAO_COOKIE" # 存储Cookie的环境变量名
+  required: true # 搜索API需要登录Cookie

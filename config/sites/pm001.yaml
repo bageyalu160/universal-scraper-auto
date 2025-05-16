@@ -1,0 +1,172 @@
+# PM001网站爬虫配置
+
+# 基本站点信息
+site:
+  name: "PM001"
+  description: "PM001钱币收藏交易平台"
+  base_url: "http://www.pm001.net/"
+  output_filename: "pm001_recent_posts.tsv"
+  encoding: "gbk"
+
+# 爬取规则
+scraping:
+  # 爬虫引擎
+  engine: "custom"
+  # 自定义模块路径
+  custom_module: "src.scrapers.pm001_scraper"
+  # 自定义爬虫函数
+  custom_function: "scrape_pm001"
+
+  # 爬取的板块ID列表
+  board_ids:
+    # 邮票类
+    - id: 5
+      name: "小版张专栏"
+      category: "邮票类"
+    - id: 7
+      name: "邮资片JP专栏"
+      category: "邮票类"
+    - id: 8
+      name: "纪特文编JT新票栏目"
+      category: "邮票类"
+    - id: 120
+      name: "年册/集邮工具"
+      category: "邮票类"
+    - id: 143
+      name: "港澳邮票专栏"
+      category: "邮票类"
+    - id: 159
+      name: "编年版票专栏"
+      category: "邮票类"
+    - id: 160
+      name: "贺年封片简卡"
+      category: "邮票类"
+    - id: 161
+      name: "纪特文编JT销封栏目"
+      category: "邮票类"
+    - id: 162
+      name: "小本票/大本册专栏"
+      category: "邮票类"
+    - id: 168
+      name: "邮票、封片靓号专栏"
+      category: "邮票类"
+    - id: 190
+      name: "普封普片"
+      category: "邮票类"
+    - id: 191
+      name: "邮资片TP/YP/FP"
+      category: "邮票类"
+    - id: 192
+      name: "个性化原票专栏"
+      category: "邮票类"
+    - id: 193
+      name: "JF封/其它类封"
+      category: "邮票类"
+    - id: 195
+      name: "贺年邮票/贺卡邮票/军邮邮票"
+      category: "邮票类"
+    - id: 196
+      name: "编年套票栏目"
+      category: "邮票类"
+    - id: 199
+      name: "原地实寄/外交/极限等封片"
+      category: "邮票类"
+    - id: 211
+      name: "邮票大类产品票礼品册"
+      category: "邮票类"
+    # 钱币类
+    - id: 2
+      name: "钱币大卖场"
+      category: "钱币类"
+    - id: 9
+      name: "现代金银贵金属币"
+      category: "钱币类"
+    # 可以添加更多板块...
+
+  # 时间范围设置
+  time_range:
+    days_limit: 2 # 抓取最近几天的帖子
+
+  # 分页设置
+  pagination:
+    pages_per_board: 2 # 每个板块抓取的页数
+
+  # URL格式
+  url_format:
+    board_page: "{base_url}index.asp?boardid={board_id}&page={page_num}"
+
+# 网络请求配置
+network:
+  # 重试设置
+  retry:
+    max_retries: 3
+    backoff_factor: 0.5
+    status_forcelist: [408, 429, 500, 502, 503, 504]
+
+  # 超时设置
+  timeout: 30 # 请求超时时间（秒）
+
+  # 延迟设置
+  delay:
+    page_delay:
+      min: 2 # 最小延迟（秒）
+      max: 4 # 最大延迟（秒）
+    board_delay:
+      min: 3 # 最小延迟（秒）
+      max: 6 # 最大延迟（秒）
+
+  # User-Agent配置
+  user_agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15"
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0"
+
+# 解析配置
+parsing:
+  # 帖子选择器
+  post_selector: "div.list"
+
+  # 字段选择器
+  field_selectors:
+    title:
+      selector: "div.listtitle a"
+      attribute: "text"
+    post_id:
+      selector: "div.listtitle a"
+      attribute: "href"
+      regex: "ID=(\\d+)"
+    author:
+      selector: "div.list_a a"
+      attribute: "text"
+    date:
+      selector: "div.list_r1 div.list_t a"
+      attribute: "text"
+    replies:
+      selector: "div.list_c:first-child"
+      attribute: "text"
+    views:
+      selector: "div.list_c:nth-child(2)"
+      attribute: "text"
+
+# 输出配置
+output:
+  # 输出文件字段
+  fields:
+    [
+      "board_id",
+      "board_name",
+      "page",
+      "post_id",
+      "title",
+      "author",
+      "date",
+      "replies",
+      "views",
+    ]
+
+  # 日志配置
+  logging:
+    filename: "pm001_scraper.log"
+    level: "INFO" # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    format: "%(asctime)s - %(levelname)s - %(message)s"

@@ -1,0 +1,18 @@
+{
+  "tasks": [
+    {
+      "id": "heimao-1",
+      "name": "黑猫投诉 爬虫任务",
+      "site": "heimao",
+      "type": "crawler",
+      "status": "completed",
+      "startTime": "2025-05-15T09:03:36Z",
+      "endTime": "2025-05-15T09:03:36Z",
+      "result": {
+        "status": "success",
+        "count": 0,
+        "message": "成功运行但无数据(Cookie无效)"
+      }
+    }
+  ]
+}

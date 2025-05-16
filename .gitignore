@@ -1,0 +1,9 @@
+# SpecStory explanation file
+.specstory/.what-is-this.md
+.specstory/
+.history/
+.venv/
+.idea/
+.vscode/
+.DS_Store
+.env
