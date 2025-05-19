@@ -42,6 +42,7 @@ class ProxyPool:
     - 自动验证代理可用性
     - 支持代理轮换策略
     - 记录代理使用状态和成功率
+    - 异常恢复机制
     """
     
     _instance = None  # 单例模式实例
@@ -76,6 +77,8 @@ class ProxyPool:
         self.config = self._load_config(config_path)  # 加载配置
         self.update_interval = self.config.get('update_interval', 3600)  # 默认1小时更新一次
         self.max_fails = self.config.get('max_fails', 3)  # 代理最大失败次数
+        self.recovery_threshold = self.config.get('recovery_threshold', 5)  # 触发恢复的代理数量阈值
+        self.auto_recovery = self.config.get('auto_recovery', True)  # 是否启用自动恢复
         
         # 创建代理状态存储目录
         self.status_dir = Path('status/proxies')
@@ -205,37 +208,45 @@ class ProxyPool:
         update_thread.start()
         logger.info("代理池自动更新线程已启动")
     
-    def update_proxies(self, force: bool = False):
+    def update_proxies(self, force: bool = False, source_type: str = "all"):
         """
         更新代理池，从各种代理源获取新代理
         
         Args:
             force (bool): 是否强制更新，即使未到更新时间
+            source_type (str): 代理源类型，可选值为"all", "api", "file"
         """
         # 如果未到更新时间且非强制更新，则跳过
         if time.time() - self.last_update < self.update_interval and not force:
             return
         
         with self._lock:
-            logger.info("开始更新代理池")
+            logger.info(f"开始更新代理池 (源类型: {source_type})")
             new_proxies = []
             
             # 获取配置中的代理源
             sources = self.config.get('sources', [])
             
+            # 过滤指定类型的代理源
+            if source_type != "all":
+                sources = [s for s in sources if s.get('type', '') == source_type]
+            
             # 从各个代理源获取代理
             for source in sources:
                 source_type = source.get('type', '')
                 
-                if source_type == 'api':
-                    # 从API获取代理
-                    proxies = self._get_proxies_from_api(source)
-                    new_proxies.extend(proxies)
-                
-                elif source_type == 'file':
-                    # 从文件获取代理
-                    proxies = self._get_proxies_from_file(source)
-                    new_proxies.extend(proxies)
+                try:
+                    if source_type == 'api':
+                        # 从API获取代理
+                        proxies = self._get_proxies_from_api(source)
+                        new_proxies.extend(proxies)
+                    
+                    elif source_type == 'file':
+                        # 从文件获取代理
+                        proxies = self._get_proxies_from_file(source)
+                        new_proxies.extend(proxies)
+                except Exception as e:
+                    logger.error(f"从源 {source_type} 获取代理失败: {e}")
             
             # 更新代理池
             if new_proxies:
@@ -252,9 +263,154 @@ class ProxyPool:
                 # 保存状态
                 self._save_status()
                 
-                logger.info(f"代理池更新完成，当前有 {len(self.proxies)} 个可用代理")
+                logger.info(f"代理池更新完成，当前有 {len(self.proxies)} 个有效代理")
             else:
-                logger.warning("未获取到新代理")
+                logger.warning("未获取到新的代理")
+                
+                # 检查是否需要触发恢复机制
+                if len(self.proxies) < self.recovery_threshold and self.auto_recovery:
+                    logger.warning(f"代理数量低于阈值 ({len(self.proxies)} < {self.recovery_threshold})，尝试恢复失败代理")
+                    self._try_recover_failed_proxies()
+    
+    def _try_recover_failed_proxies(self):
+        """尝试恢复部分失败的代理，用于在代理不足时临时应急"""
+        # 如果没有失败代理，直接返回
+        if not self.failed_proxies:
+            return
+        
+        logger.info("开始尝试恢复失败代理")
+        
+        # 筛选失败次数较少的代理进行重试
+        retry_candidates = {}
+        for proxy, fails in self.failed_proxies.items():
+            if fails <= self.max_fails:  # 只重试失败次数不超过阈值的代理
+                retry_candidates[proxy] = fails
+        
+        # 按失败次数排序，优先尝试失败较少的代理
+        sorted_candidates = sorted(retry_candidates.items(), key=lambda x: x[1])
+        
+        # 最多尝试20个代理
+        candidates_to_try = [p[0] for p in sorted_candidates[:20]]
+        
+        if candidates_to_try:
+            # 重新验证这些代理
+            recovered_proxies = self._validate_proxies(candidates_to_try)
+            
+            # 将验证通过的代理添加回代理池，并从失败列表中移除
+            for proxy in recovered_proxies:
+                if proxy in self.failed_proxies:
+                    del self.failed_proxies[proxy]
+                    if proxy not in self.proxies:
+                        self.proxies.append(proxy)
+            
+            # 保存状态
+            self._save_status()
+            
+            logger.info(f"成功恢复 {len(recovered_proxies)} 个代理")
+        else:
+            logger.info("没有合适的失败代理可供恢复")
+    
+    def integrate_with_workflow(self, action: str = "update", source_type: str = "all") -> Dict[str, Any]:
+        """
+        与工作流集成的接口，提供统一的命令执行入口
+        
+        Args:
+            action (str): 要执行的操作，可选值为 "update", "validate", "clear", "rebuild", "recover"
+            source_type (str): 代理源类型，用于更新操作，可选值为 "all", "api", "file"
+            
+        Returns:
+            Dict[str, Any]: 操作结果统计
+        """
+        start_time = time.time()
+        result = {
+            "action": action,
+            "timestamp": time.time()
+        }
+        
+        try:
+            if action == "update":
+                self.update_proxies(force=True, source_type=source_type)
+                result.update({
+                    "source": source_type,
+                    "valid_count": len(self.proxies),
+                    "failed_count": len(self.failed_proxies)
+                })
+            
+            elif action == "validate":
+                # 获取验证前的代理数
+                before_count = len(self.proxies)
+                
+                # 验证所有代理
+                self.proxies = self._validate_proxies(self.proxies)
+                self.last_update = time.time()
+                self._save_status()
+                
+                # 获取验证后的代理数
+                after_count = len(self.proxies)
+                
+                # 计算失效率
+                fail_rate = ((before_count - after_count) / before_count * 100) if before_count > 0 else 0
+                
+                result.update({
+                    "before_count": before_count,
+                    "after_count": after_count,
+                    "fail_rate": fail_rate
+                })
+            
+            elif action == "clear":
+                # 获取清理前的计数
+                failed_before = len(self.failed_proxies)
+                
+                # 清空失效代理列表
+                self.failed_proxies = {}
+                self._save_status()
+                
+                result.update({
+                    "failed_cleared": failed_before
+                })
+            
+            elif action == "rebuild":
+                # 清空现有代理
+                self.proxies = []
+                self.failed_proxies = {}
+                self.used_proxies = {}
+                
+                # 更新代理池
+                self.update_proxies(force=True, source_type=source_type)
+                
+                result.update({
+                    "source": source_type,
+                    "valid_count": len(self.proxies)
+                })
+            
+            elif action == "recover":
+                # 尝试恢复失败代理
+                before_count = len(self.proxies)
+                self._try_recover_failed_proxies()
+                after_count = len(self.proxies)
+                
+                result.update({
+                    "before_count": before_count,
+                    "after_count": after_count,
+                    "recovered_count": after_count - before_count
+                })
+            
+            else:
+                raise ValueError(f"未知操作类型: {action}")
+            
+            # 计算操作耗时
+            result["elapsed_time"] = time.time() - start_time
+            result["status"] = "success"
+            
+        except Exception as e:
+            logger.error(f"执行操作 {action} 时发生错误: {e}")
+            
+            # 添加错误信息到结果
+            result["status"] = "error"
+            result["error"] = str(e)
+            result["elapsed_time"] = time.time() - start_time
+        
+        return result
     
     def _get_proxies_from_api(self, source: Dict[str, Any]) -> List[Dict[str, str]]:
         """

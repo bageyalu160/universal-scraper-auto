@@ -32,6 +32,7 @@ universal-scraper/
 │   │   │   ├── general_prompt.txt    # 通用提示词
 │   │   │   ├── heimao_prompt.txt     # 黑猫投诉分析提示词
 │   │   │   └── pm001_prompt.txt      # PM001分析提示词
+│   │   └── ...
 │   ├── workflow/             # 工作流模板
 │   │   ├── crawler.yml.template     # 爬虫工作流模板
 │   │   ├── analyzer.yml.template    # 分析工作流模板
@@ -861,6 +862,108 @@ board_id,board_name,post_id,title,author,date,replies,views
 - 添加代理池和反爬机制支持
 - 集成基于 GitHub Pages 的监控系统
 
+## 最新更新（代理池与反爬机制增强）
+
+为了提高爬虫的稳定性和成功率，我们对代理池管理和反爬虫机制进行了以下增强：
+
+### 代理池管理增强
+
+1. **代理池与工作流集成**
+
+   - 将代理池管理完全集成到主爬虫工作流
+   - 自动检查代理数量，确保爬虫任务前有足够可用代理
+   - 爬虫任务后更新代理使用统计
+
+2. **异常恢复机制**
+
+   - 添加代理失效自动恢复功能
+   - 支持多级故障转移策略（更新->恢复->重建）
+   - 代理数量低于阈值时触发自动恢复
+
+3. **代理轮换策略优化**
+   - 智能代理轮换，减少被封风险
+   - 失败代理自动报告和更换
+   - 代理统计和状态持久化
+
+### 反爬虫机制增强
+
+1. **浏览器行为模拟**
+
+   - 模拟真实用户的浏览行为（引荐页面访问、页面停留时间）
+   - 请求序列聚类，使请求模式更自然
+   - 表单交互模拟
+
+2. **智能延迟管理**
+
+   - 基于正态分布的随机延迟，更贴近真实用户行为
+   - 自适应延迟策略，根据网站响应调整
+   - 多种预设延迟策略（从超快到隐身模式）
+
+3. **封锁检测与规避**
+
+   - 自动识别多种封锁模式
+   - 检测到封锁时智能重试
+   - IP 轮换与浏览器指纹更换结合
+
+4. **工作流模板标准化**
+   - 统一更新各工作流模板，确保一致性
+   - 增强错误处理和重试逻辑
+   - 完整的状态报告和通知
+
+### 使用示例
+
+```python
+# 使用代理池和反爬机制的爬虫示例
+from src.utils.proxy_pool import get_proxy, report_proxy_status
+from src.utils.anti_detect import create_request_pattern_manager
+
+# 创建请求模式管理器
+request_manager = create_request_pattern_manager('example_site', {
+    'delay_strategy': 'normal',
+    'proxy': {
+        'enabled': True,
+        'rotation_count': 5,
+        'rotate_on_failure': True
+    }
+})
+
+# 获取待爬取的URL列表
+urls = ['https://example.com/page1', 'https://example.com/page2', '...']
+
+# 随机化请求顺序，模拟真实用户行为
+urls = request_manager.randomize_requests(urls)
+
+# 使用重试机制执行请求
+import requests
+for url in urls:
+    response, success = request_manager.execute_with_retry(requests.get, url)
+    if success:
+        # 处理成功响应
+        process_data(response)
+    else:
+        # 处理失败
+        log_failure(url)
+```
+
 ## 许可证
 
 MIT License
+
+## 工作流生成器更新
+
+工作流生成器已更新，支持生成通用工作流文件：
+
+- **主调度工作流(master_workflow.yml)**：用于协调多个站点的爬取和分析任务
+- **仪表盘更新工作流(update_dashboard.yml)**：用于构建和部署监控仪表盘
+
+### 使用方法
+
+```bash
+# 生成通用工作流
+python3 scripts/workflow_generator.py --type common
+
+# 生成所有工作流（包括通用工作流和站点特定工作流）
+python3 scripts/workflow_generator.py --type all --all
+```
+
+详细使用说明请参阅[工作流生成器使用指南](docs/workflow_usage.md)。

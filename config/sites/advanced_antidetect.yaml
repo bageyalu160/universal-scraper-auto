@@ -1,0 +1,176 @@
+##################################################
+# 高级反爬虫站点配置示例
+# 包含完整的反爬虫和异常恢复机制
+##################################################
+
+# 基本站点信息
+site_id: advanced_antidetect
+site_name: "高级反爬虫示例"
+site_url: "https://example.com"
+description: "包含完整反爬机制和异常恢复的示例配置"
+
+# 爬虫引擎配置
+engine: playwright
+browser_type: chromium # chromium, firefox, webkit
+headless: false # 使用有头浏览器以避免检测
+stealth_mode: true # 启用浏览器指纹伪装
+
+# 代理配置
+proxy:
+  enabled: true
+  type: rotating # rotating, static, pool
+  source: internal_pool # 使用内部代理池
+  fallback_strategy: retry_with_new # 当代理失败时，使用新代理重试
+  geo_locations:
+    - country: CN
+    - country: US
+
+# 反爬虫配置
+anti_detection:
+  # 用户代理选择策略
+  user_agent:
+    mode: random # fixed, random, rotate
+    desktop_only: true
+    list:
+      - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+  # 浏览器特征控制
+  fingerprint:
+    enabled: true
+    webgl_noise: true
+    canvas_noise: true
+    audio_noise: true
+    hardware_concurrency: 4
+    device_memory: 8
+    timezone: "Asia/Shanghai"
+    languages: ["zh-CN", "en-US"]
+
+  # 人类行为模拟
+  behavior:
+    enabled: true
+    random_scroll: true # 随机滚动页面
+    mouse_movements: true # 随机鼠标移动
+    typing_pattern: human # human, bot, disabled
+    wait_times:
+      min: 1.5 # 最短等待时间（秒）
+      max: 5.0 # 最长等待时间（秒）
+
+  # Cookie与会话管理
+  cookies:
+    enabled: true
+    save_path: "data/cookies/advanced_antidetect/"
+    persistence: true # 持久化Cookie
+    rotation:
+      enabled: true
+      count: 5
+      strategy: round_robin
+
+  # 高级反爬策略
+  advanced:
+    hide_automation: true # 隐藏自动化特征
+    emulate_plugins: true # 模拟浏览器插件
+    spoof_webrtc: true # 伪装WebRTC信息
+    disable_webdriver: true # 禁用WebDriver检测
+    bypass_cloudflare: true # 绕过Cloudflare保护
+
+# 异常恢复机制
+recovery:
+  enabled: true
+
+  # 重试策略
+  retry:
+    max_attempts: 5
+    backoff:
+      initial: 5 # 初始等待秒数
+      factor: 2.0 # 指数增长因子
+      max: 300 # 最大等待秒数
+
+  # 错误处理策略
+  error_handling:
+    captcha:
+      detection: true
+      solver: 2captcha # 2captcha, anticaptcha, custom
+      api_key: "${CAPTCHA_API_KEY}"
+
+    ip_ban:
+      detection: true
+      action: rotate_proxy # rotate_proxy, wait, abort
+      wait_time: 1800 # 被封禁后等待时间（秒）
+
+    rate_limit:
+      detection: true
+      action: adaptive_slowdown # 自适应降速
+      min_delay: 10
+      max_delay: 60
+
+    connection:
+      timeout_seconds: 30
+      action: retry # retry, skip, abort
+
+  # 状态恢复
+  state_recovery:
+    enabled: true
+    save_state: true
+    state_dir: "status/recovery/advanced_antidetect/"
+    checkpoint_frequency: 10 # 每抓取10个项目保存一次状态
+    resume_from_checkpoint: true # 从检查点恢复
+
+# 数据提取配置
+extraction:
+  method: selector # selector, api, hybrid
+  targets:
+    - name: title
+      selector: "h1.title"
+      required: true
+    - name: content
+      selector: "div.content"
+      required: true
+    - name: price
+      selector: "span.price"
+      required: false
+      default: "0"
+
+  pagination:
+    enabled: true
+    type: infinite_scroll # button, infinite_scroll, url_pattern
+    max_pages: 10
+    next_button: "button.next-page"
+    wait_after_scroll: 3
+
+# 限速配置
+rate_limit:
+  requests_per_minute: 15
+  max_requests_per_session: 500
+  dynamic_rate: true # 动态调整请求频率
+  session_idle_time: 60 # 会话空闲时间（秒）
+
+# 输出配置
+output:
+  format: json
+  pretty: true
+  filename: "data/advanced_antidetect_data.json"
+  compression: false
+  encryption: false
+
+# 日志配置
+logging:
+  level: INFO
+  verbose: true
+  save_to_file: true
+  log_file: "logs/advanced_antidetect.log"
+  include_request_details: true
+
+# 通知配置
+notification:
+  enabled: true
+  events:
+    - on_complete
+    - on_error
+    - on_rate_limit
+    - on_captcha
+  channels:
+    - type: webhook
+      url: "${NOTIFICATION_WEBHOOK}"
+    - type: email
+      address: "${NOTIFICATION_EMAIL}"

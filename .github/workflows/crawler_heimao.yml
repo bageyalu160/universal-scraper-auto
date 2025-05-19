@@ -2,7 +2,7 @@ name: 黑猫投诉 爬虫任务
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: 0 9 * * *
+    - cron: '0 9 * * *'
 env:
   PYTHON_VERSION: '3.10'
   RUN_DATE: ${{ github.event.inputs.date || '' }}
@@ -15,15 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库代码
-        uses: actions/checkout@v4
+        uses: 'actions/checkout@v4'
         with:
           fetch-depth: 0
       - name: 设置日期环境变量
-        run: echo "RUN_DATE=$(date -u +"%Y-%m-%d")" >> $GITHUB_ENV
+        run: 'echo "RUN_DATE=$(date -u +"%Y-%m-%d")" >> $GITHUB_ENV'
       - name: 设置Python环境
-        uses: actions/setup-python@v5
+        uses: 'actions/setup-python@v5'
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: '${{ env.PYTHON_VERSION }}'
           cache: pip
       - name: 安装依赖
         run: |-
@@ -60,9 +60,9 @@ jobs:
             echo "file_size=0" >> $GITHUB_OUTPUT
           fi
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          HEIMAO_COOKIE: ${{ secrets.HEIMAO_COOKIE }}
+          OPENAI_API_KEY: '${{ secrets.OPENAI_API_KEY }}'
+          GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+          HEIMAO_COOKIE: '${{ secrets.HEIMAO_COOKIE }}'
           HEIMAO_KEYWORDS: ${{ vars.HEIMAO_KEYWORDS || '' }}
           ENABLE_NOTIFICATION: ${{ vars.ENABLE_NOTIFICATION || 'false' }}
           NOTIFICATION_TYPE: ${{ vars.NOTIFICATION_TYPE || 'none' }}
@@ -113,10 +113,10 @@ jobs:
             echo "成功提交并推送爬虫结果和状态"
           fi
       - name: 触发分析工作流
-        uses: benc-uk/workflow-dispatch@v1
+        uses: 'benc-uk/workflow-dispatch@v1'
         with:
           workflow: analyzer_heimao.yml
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: '${{ secrets.GITHUB_TOKEN }}'
           inputs: '{"data_date": "${{ env.RUN_DATE }}", "data_file": "data/daily/${{ env.RUN_DATE
             }}/heimao_data.json", "site_id": "heimao"}'
-        if: steps.run-scraper.outputs.file_exists == 'true'
+        if: ${{ steps.run-scraper.outputs.file_exists == 'true' }}

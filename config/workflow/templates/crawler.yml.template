@@ -21,11 +21,6 @@ on:
         description: '搜索关键词 (以逗号分隔)'
         required: false
         type: string
-      use_proxy:
-        description: '是否使用代理'
-        required: false
-        default: true
-        type: boolean
   
   # 定时触发
   schedule:
@@ -46,10 +41,12 @@ env:
   TZ: "Asia/Shanghai"
   # 使用shell命令定义日期
   RUN_DATE: {% raw %}${{ github.event.inputs.date || '' }}{% endraw %}
+  # 代理池和反爬机制配置
+  USE_PROXY: {% raw %}${{ vars.USE_PROXY || 'true' }}{% endraw %}
+  ROTATE_PROXY: {% raw %}${{ vars.ROTATE_PROXY || 'true' }}{% endraw %}
+  ANTI_DETECT_ENABLED: {% raw %}${{ vars.ANTI_DETECT_ENABLED || 'true' }}{% endraw %}
   # 添加黑猫投诉Cookie环境变量
   HEIMAO_COOKIE: {% raw %}${{ secrets.HEIMAO_COOKIE }}{% endraw %}
-  # 是否使用代理
-  USE_PROXY: {% raw %}${{ github.event.inputs.use_proxy || 'true' }}{% endraw %}
 
 # 定义工作流的权限
 permissions:
@@ -75,7 +72,6 @@ jobs:
       run_date: {% raw %}${{ steps.prepare_env.outputs.date }}{% endraw %}
       cache_key: {% raw %}${{ steps.prepare_env.outputs.cache_key }}{% endraw %}
       site_config_valid: {% raw %}${{ steps.validate_config.outputs.valid }}{% endraw %}
-      use_proxy: {% raw %}${{ steps.prepare_env.outputs.use_proxy }}{% endraw %}
     
     steps:
       - name: 检出代码
@@ -100,9 +96,6 @@ jobs:
           else
             echo "cache_key=deps-${{ site_id }}-default-v1" >> $GITHUB_OUTPUT
           fi
-          
-          # 设置是否使用代理
-          echo "use_proxy=$USE_PROXY" >> $GITHUB_OUTPUT
       
       - name: 验证站点配置
         id: validate_config
@@ -116,126 +109,13 @@ jobs:
             exit 1
           fi
 
-  # 检查代理可用性（如果需要）
-  check-proxy:
-    name: 检查代理可用性
-    needs: pre-check
-    if: needs.pre-check.outputs.use_proxy == 'true'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: 设置Python环境
-        uses: actions/setup-python@v5
-        with:
-          python-version: {% raw %}${{ env.PYTHON_VERSION }}{% endraw %}
-          cache: "pip"
-      
-      - name: 安装依赖
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            echo "安装必要的依赖..."
-            pip install requests pyyaml
-          fi
-      
-      - name: 创建必要目录
-        run: |
-          mkdir -p data/proxies
-          mkdir -p status/proxies
-          mkdir -p logs
-      
-      - name: 检查代理池状态
-        id: check_proxy_pool
-        run: |
-          # 检查代理状态文件是否存在
-          if [ -f "status/proxies/pool_status.json" ]; then
-            echo "发现代理池状态文件"
-            
-            # 获取代理统计
-            if [ -x "$(command -v jq)" ]; then
-              valid_count=$(cat status/proxies/pool_status.json | jq '.stats.valid_count')
-            else
-              valid_count=$(grep -o '"valid_count":[0-9]*' status/proxies/pool_status.json | grep -o '[0-9]*')
-            fi
-            
-            echo "当前有效代理数: $valid_count"
-            
-            # 检查代理数量是否足够
-            if [ "$valid_count" -lt "5" ]; then
-              echo "⚠️ 代理数量不足 ($valid_count < 5)，需要更新代理池"
-              echo "sufficient=false" >> $GITHUB_OUTPUT
-            else
-              echo "✅ 代理数量充足 ($valid_count >= 5)"
-              echo "sufficient=true" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "⚠️ 未找到代理池状态文件，需要初始化代理池"
-            echo "sufficient=false" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: 更新代理池
-        if: steps.check_proxy_pool.outputs.sufficient == 'false'
-        run: |
-          echo "开始更新代理池..."
-          
-          # 尝试执行更新，如果失败则尝试恢复
-          if ! python scripts/proxy_manager.py --action update --source all; then
-            echo "更新失败，尝试恢复..."
-            if ! python scripts/proxy_manager.py --action recover; then
-              echo "恢复失败，尝试重建..."
-              python scripts/proxy_manager.py --action rebuild --source all
-            fi
-          fi
-          
-          # 检查更新后的状态
-          if [ -f "status/proxies/pool_status.json" ]; then
-            if [ -x "$(command -v jq)" ]; then
-              valid_count=$(cat status/proxies/pool_status.json | jq '.stats.valid_count')
-            else
-              valid_count=$(grep -o '"valid_count":[0-9]*' status/proxies/pool_status.json | grep -o '[0-9]*')
-            fi
-            
-            echo "更新后的有效代理数: $valid_count"
-          else
-            echo "⚠️ 更新后仍未找到代理池状态文件"
-          fi
-      
-      - name: 提交代理池状态
-        if: steps.check_proxy_pool.outputs.sufficient == 'false'
-        run: |
-          # 配置Git
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # 添加状态文件
-          git add status/proxies/pool_status.json
-          git add data/proxies/
-          
-          # 提交更改
-          if git diff --staged --quiet; then
-            echo "没有代理池状态变更，无需提交"
-          else
-            git commit -m "🔄 爬虫任务前的代理池更新 (站点: $SITE_ID)"
-            git push
-            echo "✅ 成功提交代理池状态更新"
-          fi
-
   # 爬虫作业 - 使用矩阵策略支持多引擎
   crawl:
     name: 运行爬虫
-    needs: [pre-check, check-proxy]
-    if: always() && needs.pre-check.outputs.site_config_valid == 'true' && (needs.check-proxy.result == 'success' || needs.pre-check.outputs.use_proxy != 'true')
+    needs: pre-check
     runs-on: ubuntu-latest
     env:
       RUN_DATE: {% raw %}${{ needs.pre-check.outputs.run_date }}{% endraw %}
-      USE_PROXY: {% raw %}${{ needs.pre-check.outputs.use_proxy }}{% endraw %}
     
     steps:
       - name: 检出代码
@@ -257,7 +137,62 @@ jobs:
             echo "安装必要的依赖..."
             pip install {{ scraper_dependencies }}
           fi
+
+      # 新增步骤：检查代理池状态
+      - name: 检查代理池状态
+        id: check_proxy_pool
+        if: env.USE_PROXY == 'true'
+        run: |
+          if [ -f "status/proxies/pool_status.json" ]; then
+            echo "代理池状态文件存在"
+            # 获取有效代理数量
+            valid_count=$(cat status/proxies/pool_status.json | jq '.valid_proxies | length')
+            echo "有效代理数量: $valid_count"
+            
+            if [ "$valid_count" -lt "5" ]; then
+              echo "⚠️ 有效代理数量不足，尝试更新代理池"
+              echo "needs_update=true" >> $GITHUB_OUTPUT
+            else
+              echo "✅ 代理池状态正常"
+              echo "needs_update=false" >> $GITHUB_OUTPUT
+            fi
+            echo "pool_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ 代理池状态文件不存在，需要初始化"
+            echo "pool_exists=false" >> $GITHUB_OUTPUT
+            echo "needs_update=true" >> $GITHUB_OUTPUT
+          fi
       
+      # 新增步骤：更新代理池(如果需要)
+      - name: 更新代理池
+        if: env.USE_PROXY == 'true' && steps.check_proxy_pool.outputs.needs_update == 'true'
+        env:
+          PROXY_API_KEY: {% raw %}${{ secrets.PROXY_API_KEY }}{% endraw %}
+          PROXY_SOURCE_URL: {% raw %}${{ secrets.PROXY_SOURCE_URL }}{% endraw %}
+        run: |
+          echo "执行代理池更新..."
+          
+          if [ "{% raw %}${{ steps.check_proxy_pool.outputs.pool_exists }}{% endraw %}" == "true" ]; then
+            # 更新现有代理池
+            python scripts/proxy_manager.py --action update --source all
+          else
+            # 初始化代理池
+            python scripts/proxy_manager.py --action rebuild --source all
+          fi
+          
+          # 检查更新结果
+          if [ -f "status/proxies/pool_status.json" ]; then
+            valid_count=$(cat status/proxies/pool_status.json | jq '.valid_proxies | length')
+            echo "更新后有效代理: $valid_count 个"
+            
+            if [ "$valid_count" -eq "0" ]; then
+              echo "⚠️ 警告：代理池更新后无可用代理"
+            fi
+          else
+            echo "❌ 代理池更新失败，状态文件不存在"
+          fi
+      
+      # 安装Playwright (如需要)
       - name: 安装Playwright (如需要)
         id: check_engine
         run: |
@@ -285,13 +220,25 @@ jobs:
 {% for env_var in env_vars %}
           {{ env_var.name }}: {% raw %}${{ secrets.{% endraw %}{{ env_var.secret }}{% raw %} }}{% endraw %}
 {% endfor %}
+          # 代理池相关
+          PROXY_API_KEY: {% raw %}${{ secrets.PROXY_API_KEY }}{% endraw %}
+          PROXY_SOURCE_URL: {% raw %}${{ secrets.PROXY_SOURCE_URL }}{% endraw %}
+          USE_PROXY: {% raw %}${{ env.USE_PROXY }}{% endraw %}
+          ROTATE_PROXY: {% raw %}${{ env.ROTATE_PROXY }}{% endraw %}
+          
+          # 反爬机制相关
+          ANTI_DETECT_ENABLED: {% raw %}${{ env.ANTI_DETECT_ENABLED }}{% endraw %}
+          CAPTCHA_API_KEY: {% raw %}${{ secrets.CAPTCHA_API_KEY }}{% endraw %}
+          CAPTCHA_SERVICE: {% raw %}${{ vars.CAPTCHA_SERVICE || '2captcha' }}{% endraw %}
+          BROWSER_FINGERPRINT: {% raw %}${{ vars.BROWSER_FINGERPRINT || 'true' }}{% endraw %}
+          
+          # 原有环境变量
           HEIMAO_COOKIE: {% raw %}${{ secrets.HEIMAO_COOKIE }}{% endraw %}
           HEIMAO_KEYWORDS: {% raw %}${{ github.event.inputs.keywords || vars.HEIMAO_KEYWORDS || '' }}{% endraw %}
           ENABLE_NOTIFICATION: {% raw %}${{ vars.ENABLE_NOTIFICATION || 'false' }}{% endraw %}
           NOTIFICATION_TYPE: {% raw %}${{ vars.NOTIFICATION_TYPE || 'none' }}{% endraw %}
           NOTIFICATION_WEBHOOK: {% raw %}${{ vars.NOTIFICATION_WEBHOOK || '' }}{% endraw %}
           DEBUG_MODE: {% raw %}${{ github.event.inputs.debug || 'false' }}{% endraw %}
-          USE_PROXY: {% raw %}${{ env.USE_PROXY }}{% endraw %}
         run: |
           echo "📌 开始运行爬虫 (站点: $SITE_ID, 日期: $RUN_DATE)"
           
@@ -300,12 +247,9 @@ jobs:
             export LOG_LEVEL=DEBUG
           fi
           
-          # 代理设置通知
-          if [ "$USE_PROXY" = "true" ]; then
-            echo "👥 代理已启用"
-          else
-            echo "⚠️ 代理未启用"
-          fi
+          # 记录代理和反爬设置
+          echo "🔒 代理设置: USE_PROXY=$USE_PROXY, ROTATE_PROXY=$ROTATE_PROXY"
+          echo "🛡️ 反爬设置: ANTI_DETECT_ENABLED=$ANTI_DETECT_ENABLED, BROWSER_FINGERPRINT=$BROWSER_FINGERPRINT"
           
           # 运行爬虫脚本
           python {{ scraper_script }} --site $SITE_ID --config config/sites/$SITE_ID.yaml --output {{ data_dir }}/daily/$RUN_DATE/
@@ -330,76 +274,76 @@ jobs:
             echo "❌ 爬虫进程失败 (退出代码: $exit_code)"
             echo "file_exists=false" >> $GITHUB_OUTPUT
           fi
-
-  # 分析作业
-  analyze:
-    name: 运行分析
-    needs: [pre-check, crawl]
-    if: needs.crawl.outputs.file_exists == 'true'
-    runs-on: ubuntu-latest
-    env:
-      RUN_DATE: {% raw %}${{ needs.pre-check.outputs.run_date }}{% endraw %}
-    
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       
-      # 其余分析步骤保持不变
-      # ... 现有分析步骤 ...
-
-  # 更新代理池统计
-  update-proxy-stats:
-    name: 更新代理使用统计
-    needs: [pre-check, crawl]
-    if: always() && needs.pre-check.outputs.use_proxy == 'true'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: 设置Python环境
-        uses: actions/setup-python@v5
-        with:
-          python-version: {% raw %}${{ env.PYTHON_VERSION }}{% endraw %}
-          cache: "pip"
-      
-      - name: 安装依赖
+      - name: 创建爬虫状态文件
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
+          mkdir -p {{ status_dir }}
+          if [ "{% raw %}${{ steps.run_scraper.outputs.file_exists }}{% endraw %}" == "true" ]; then
+            cat > {{ status_dir }}/crawler_$SITE_ID.json << EOF
+            {
+              "status": "success",
+              "site_id": "$SITE_ID",
+              "date": "$RUN_DATE",
+              "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+              "file_path": "{{ data_dir }}/daily/$RUN_DATE/{{ output_filename }}",
+              "file_size": "{% raw %}${{ steps.run_scraper.outputs.file_size }}{% endraw %}",
+              "run_id": "{% raw %}${{ github.run_id }}{% endraw %}",
+              "run_url": "{% raw %}${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}{% endraw %}",
+              "message": "爬虫运行成功"
+            }
+            EOF
           else
-            pip install requests pyyaml
+            cat > {{ status_dir }}/crawler_$SITE_ID.json << EOF
+            {
+              "status": "failed",
+              "site_id": "$SITE_ID",
+              "date": "$RUN_DATE",
+              "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+              "run_id": "{% raw %}${{ github.run_id }}{% endraw %}",
+              "run_url": "{% raw %}${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}{% endraw %}",
+              "message": "爬虫运行失败或未生成文件"
+            }
+            EOF
+          fi
+          echo "已创建爬虫状态文件"
+      
+      - name: 提交结果到仓库
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git add {{ data_dir }}/daily/$RUN_DATE/ || echo "没有数据目录变更"
+          git add {{ output_filename }} || echo "没有主数据文件"
+          git add {{ status_dir }}/crawler_$SITE_ID.json
+          
+          if git diff --staged --quiet; then
+            echo "没有变更需要提交"
+          else
+            git commit -m "🤖 自动更新: {{ site_name }}爬虫数据 ($RUN_DATE)"
+            git push
+            echo "✅ 成功提交并推送爬虫结果"
           fi
       
-      - name: 验证代理使用情况
-        id: validate_proxies
-        run: |
-          if [ -f "status/proxies/pool_status.json" ]; then
-            echo "更新代理使用统计..."
-            python scripts/proxy_manager.py --action validate
-            
-            # 提交更新
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            
-            git add status/proxies/pool_status.json
-            
-            if ! git diff --staged --quiet; then
-              git commit -m "📊 爬虫任务后的代理统计更新 (站点: $SITE_ID)"
-              git push
-              echo "✅ 成功提交代理统计更新"
-            else
-              echo "没有代理统计变更，无需提交"
-            fi
-          else
-            echo "⚠️ 未找到代理池状态文件，跳过统计更新"
-          fi
+      - name: 上传爬取数据 (作为工件)
+        if: {% raw %}steps.run_scraper.outputs.file_exists == 'true'{% endraw %}
+        uses: actions/upload-artifact@v4
+        with:
+          name: {{ site_id }}-data-${% raw %}{{ needs.pre-check.outputs.run_date }}{% endraw %}
+          path: |
+            {{ data_dir }}/daily/${% raw %}{{ needs.pre-check.outputs.run_date }}{% endraw %}/
+            {{ output_filename }}
+          retention-days: 5
+
+      {% if run_analysis %}
+      # 触发分析工作流
+      - name: 触发分析工作流
+        if: {% raw %}steps.run_scraper.outputs.file_exists == 'true'{% endraw %}
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: analyzer_{{ site_id }}.yml
+          token: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+          inputs: '{"data_date": "{% raw %}${{ needs.pre-check.outputs.run_date }}{% endraw %}", "data_file": "{{ data_dir }}/daily/{% raw %}${{ needs.pre-check.outputs.run_date }}{% endraw %}/{{ output_filename }}", "site_id": "{{ site_id }}"}'
+      {% endif %}
 
   # 通知作业
   notify:

@@ -1,4 +1,4 @@
-name: pm001 AI分析任务
+name: advanced_antidetect AI分析任务
 on:
   workflow_dispatch:
     inputs:
@@ -14,7 +14,7 @@ on:
         description: 网站ID
         required: true
         type: string
-        default: pm001
+        default: advanced_antidetect
   repository_dispatch:
     types:
       - crawler_completed
@@ -64,7 +64,7 @@ jobs:
             if [ -f "status/crawler_status.json" ]; then
               DATA_DATE=$(jq -r '.date' status/crawler_status.json)
               DATA_FILE=$(jq -r '.file_path' status/crawler_status.json)
-              SITE_ID="pm001"
+              SITE_ID="advanced_antidetect"
             else
               echo "错误: 无法确定数据日期和文件路径"
               exit 1
@@ -155,7 +155,7 @@ jobs:
             echo "没有变更需要提交"
           else
             # 创建提交
-            git commit -m "自动更新：pm001分析结果 ${{ steps.params.outputs.data_date }}"
+            git commit -m "自动更新：advanced_antidetect分析结果 ${{ steps.params.outputs.data_date }}"
             # 推送到仓库
             git push
             echo "成功提交并推送分析结果和状态"

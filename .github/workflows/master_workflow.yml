@@ -1,0 +1,243 @@
+name: 主调度工作流
+
+run-name: "🚀 主调度工作流 #${{ github.run_number }} (${{ github.actor }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: '执行操作'
+        required: true
+        type: choice
+        options:
+          - crawl_all
+          - analyze_all
+          - update_dashboard
+          - update_proxy_pool
+          - full_pipeline
+      site_id:
+        description: '站点ID (仅适用于单站点操作)'
+        required: false
+        type: string
+      date:
+        description: '数据日期 (留空则使用当前日期)'
+        required: false
+        type: string
+
+  schedule:
+    - cron: '0 0 * * *'  # 每天午夜执行完整流程
+
+permissions:
+  contents: write
+  actions: write
+  pages: write
+  id-token: write
+
+jobs:
+  setup:
+    name: 准备环境
+    runs-on: ubuntu-latest
+    outputs:
+      date: ${{ steps.set-date.outputs.date }}
+      sites: ${{ steps.list-sites.outputs.sites }}
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      
+      - name: 设置日期
+        id: set-date
+        run: |
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            echo "date=${{ github.event.inputs.date }}" >> $GITHUB_OUTPUT
+          else
+            echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: 列出可用站点
+        id: list-sites
+        run: |
+          if [ -n "${{ github.event.inputs.site_id }}" ]; then
+            SITES="[\"${{ github.event.inputs.site_id }}\"]"
+          else
+            SITES="["
+            FIRST=true
+            for site in config/sites/*.yaml; do
+              SITE_ID=$(basename $site .yaml)
+              if [ "$SITE_ID" = "example" ]; then
+                continue
+              fi
+              if [ "$FIRST" = true ]; then
+                FIRST=false
+              else
+                SITES="$SITES,"
+              fi
+              SITES="$SITES\"$SITE_ID\""
+            done
+            SITES="$SITES]"
+          fi
+          echo "sites=$SITES" >> $GITHUB_OUTPUT
+          echo "发现站点: $SITES"
+
+  # 新增：代理池更新任务
+  update_proxy_pool:
+    name: 更新代理池
+    needs: setup
+    if: github.event.inputs.action == 'update_proxy_pool' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 触发代理池工作流
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: proxy_pool_manager.yml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          inputs: '{"action": "update"}'
+
+  crawl:
+    name: 爬取数据
+    needs: [setup, update_proxy_pool]
+    if: always() && (github.event.inputs.action == 'crawl_all' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule') && (needs.update_proxy_pool.result == 'success' || needs.update_proxy_pool.result == 'skipped')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        site_id: ${{ fromJSON(needs.setup.outputs.sites) }}
+      fail-fast: false
+    
+    steps:
+      - name: 触发爬虫工作流
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: crawler_${{ matrix.site_id }}.yml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          inputs: '{"date": "${{ needs.setup.outputs.date }}"}'
+
+  analyze:
+    name: 分析数据
+    needs: [setup, crawl]
+    if: always() && (github.event.inputs.action == 'analyze_all' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule') && (needs.crawl.result == 'success' || needs.crawl.result == 'skipped')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        site_id: ${{ fromJSON(needs.setup.outputs.sites) }}
+      fail-fast: false
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      
+      - name: 获取最新数据文件
+        id: get-latest-file
+        run: |
+          SITE_ID="${{ matrix.site_id }}"
+          DATE="${{ needs.setup.outputs.date }}"
+          DATA_DIR="data/daily/$DATE"
+          
+          if [ -d "$DATA_DIR" ]; then
+            FILE=$(find $DATA_DIR -name "*${SITE_ID}*" -type f | sort | tail -n 1)
+            if [ -n "$FILE" ]; then
+              echo "data_file=$FILE" >> $GITHUB_OUTPUT
+              echo "找到数据文件: $FILE"
+            else
+              echo "⚠️ 未找到数据文件"
+              echo "data_file=" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⚠️ 数据目录不存在"
+            echo "data_file=" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: 触发分析工作流
+        if: steps.get-latest-file.outputs.data_file != ''
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: analyzer_${{ matrix.site_id }}.yml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          inputs: >-
+            {
+              "data_date": "${{ needs.setup.outputs.date }}",
+              "data_file": "${{ steps.get-latest-file.outputs.data_file }}",
+              "site_id": "${{ matrix.site_id }}"
+            }
+
+  update_dashboard:
+    name: 更新仪表盘
+    needs: [setup, analyze]
+    if: always() && (github.event.inputs.action == 'update_dashboard' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule') && (needs.analyze.result == 'success' || needs.analyze.result == 'skipped')
+    uses: ./.github/workflows/update_dashboard.yml
+
+  notify_completion:
+    name: 通知完成
+    needs: [setup, update_proxy_pool, crawl, analyze, update_dashboard]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 准备通知内容
+        id: prepare_message
+        run: |
+          FAILED_JOBS=""
+          if [[ "${{ needs.update_proxy_pool.result }}" != "success" && "${{ needs.update_proxy_pool.result }}" != "skipped" ]]; then
+            FAILED_JOBS="$FAILED_JOBS 代理池更新,"
+          fi
+          if [[ "${{ needs.crawl.result }}" != "success" && "${{ needs.crawl.result }}" != "skipped" ]]; then
+            FAILED_JOBS="$FAILED_JOBS 爬虫阶段,"
+          fi
+          if [[ "${{ needs.analyze.result }}" != "success" && "${{ needs.analyze.result }}" != "skipped" ]]; then
+            FAILED_JOBS="$FAILED_JOBS 分析阶段,"
+          fi
+          if [[ "${{ needs.update_dashboard.result }}" != "success" && "${{ needs.update_dashboard.result }}" != "skipped" ]]; then
+            FAILED_JOBS="$FAILED_JOBS 仪表盘更新,"
+          fi
+          
+          if [[ -z "$FAILED_JOBS" ]]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "message<<EOF" >> $GITHUB_OUTPUT
+            echo "### ✅ 数据流程全部完成" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "- **日期**: ${{ needs.setup.outputs.date }}" >> $GITHUB_OUTPUT
+            echo "- **站点**: ${{ github.event.inputs.site_id || '全部站点' }}" >> $GITHUB_OUTPUT
+            echo "- **操作**: ${{ github.event.inputs.action || '定时任务' }}" >> $GITHUB_OUTPUT
+            echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            FAILED_JOBS=${FAILED_JOBS%,}  # 移除最后的逗号
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "message<<EOF" >> $GITHUB_OUTPUT
+            echo "### ❌ 数据流程部分失败" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "- **日期**: ${{ needs.setup.outputs.date }}" >> $GITHUB_OUTPUT
+            echo "- **站点**: ${{ github.event.inputs.site_id || '全部站点' }}" >> $GITHUB_OUTPUT
+            echo "- **失败阶段**: $FAILED_JOBS" >> $GITHUB_OUTPUT
+            echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 检查钉钉通知配置
+        id: check_dingtalk
+        if: vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'dingtalk'
+        run: |
+          echo "has_webhook=true" >> $GITHUB_OUTPUT
+      
+      - name: 发送钉钉通知
+        if: steps.check_dingtalk.outputs.has_webhook == 'true'
+        uses: fifsky/dingtalk-action@master
+        with:
+          url: ${{ secrets.DINGTALK_WEBHOOK }}
+          type: markdown
+          content: |
+            ${{ steps.prepare_message.outputs.message }}
+      
+      - name: 检查企业微信配置
+        id: check_wechat
+        if: vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'wechat'
+        run: |
+          echo "has_webhook=true" >> $GITHUB_OUTPUT
+      
+      - name: 发送企业微信通知
+        if: steps.check_wechat.outputs.has_webhook == 'true'
+        uses: chf007/action-wechat-work@master
+        with:
+          msgtype: markdown
+          content: ${{ steps.prepare_message.outputs.message }}
+          key: ${{ secrets.WECHAT_WEBHOOK }} 

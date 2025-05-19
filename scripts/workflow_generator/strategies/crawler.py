@@ -202,7 +202,7 @@ class CrawlerWorkflowStrategy(WorkflowStrategy):
         if run_analysis:
             steps.append(Step(
                 name="触发分析工作流",
-                if_condition="steps.run-scraper.outputs.file_exists == 'true'",
+                if_condition="${{ steps.run-scraper.outputs.file_exists == 'true' }}",
                 uses="benc-uk/workflow-dispatch@v1",
                 with_params={
                     "workflow": f"analyzer_{site_id}.yml",
