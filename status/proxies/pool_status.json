@@ -1,10 +1,11 @@
 {
   "last_operation": {
-    "action": "rebuild",
-    "timestamp": 1747788252.1402848,
+    "action": "update",
+    "timestamp": 1747789197.6802547,
     "source": "all",
     "valid_count": 0,
-    "elapsed_time": 0.0002548694610595703,
+    "failed_count": 0,
+    "elapsed_time": 0.00021886825561523438,
     "status": "success"
   },
   "valid_proxies": [],
