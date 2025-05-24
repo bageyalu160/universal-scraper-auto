@@ -1,8 +1,6 @@
 {
-    "status": "success",
-    "date": "2025-05-23",
-    "timestamp": "2025-05-23T09:11:16Z",
-    "file_path": "data/daily/2025-05-23/heimao_data.json",
-    "file_size": "22",
-    "message": "爬虫运行成功，已生成数据文件"
+    "status": "failed",
+    "date": "2025-05-24",
+    "timestamp": "2025-05-24T00:52:14Z",
+    "message": "爬虫运行失败或未生成文件"
   }
