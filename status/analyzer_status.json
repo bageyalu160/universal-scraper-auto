@@ -1,8 +1,8 @@
 {
     "status": "failed",
     "site_id": "heimao",
-    "date": "2025-05-23",
-    "timestamp": "2025-05-23T09:11:54Z",
-    "data_file": "data/daily/2025-05-23/heimao_data.json",
+    "date": "2025-05-24",
+    "timestamp": "2025-05-24T09:09:49Z",
+    "data_file": "data/daily/2025-05-24/heimao_data.json",
     "message": "数据分析失败或无结果"
   }
