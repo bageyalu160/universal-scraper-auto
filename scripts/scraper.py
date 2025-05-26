@@ -36,8 +36,8 @@ def load_config(site_id, config_file=None):
     
     return config
 
-def run_scraper(site_id, config, output_dir=None):
-    """根据配置运行爬虫"""
+def run_scraper(site_id, config, output_dir=None, **kwargs):
+    """根据配置运行爬虫，支持自动透传额外参数"""
     scraping = config.get('scraping', {})
     engine = scraping.get('engine', 'custom')
     
@@ -55,9 +55,9 @@ def run_scraper(site_id, config, output_dir=None):
             module = importlib.import_module(module_path)
             scrape_function = getattr(module, function_name)
             
-            # 运行爬虫
-            logger.info(f"使用自定义模块 {module_path}.{function_name} 运行爬虫")
-            result = scrape_function(config, output_dir)
+            # 运行爬虫，自动透传kwargs
+            logger.info(f"使用自定义模块 {module_path}.{function_name} 运行爬虫 (自动透传参数)")
+            result = scrape_function(config, output_dir, **kwargs)
             
             # 复制结果文件到当前目录（如果需要）
             output_config = config.get('output', {})
@@ -89,12 +89,31 @@ def main():
     parser.add_argument('--site', required=True, help='站点ID，对应config/sites/下的配置文件名')
     parser.add_argument('--config', help='可选的配置文件路径')
     parser.add_argument('--output-dir', help='可选的输出目录')
-    args = parser.parse_args()
-    
+    parser.add_argument('--date', type=str, help='数据日期')
+    parser.add_argument('--output', type=str, help='输出文件路径')
+    parser.add_argument('--status', type=str, help='状态文件路径')
+    parser.add_argument('--log-file', type=str, help='日志文件路径')
+    args, unknown = parser.parse_known_args()
+
+    # 自动解析未知参数为字典
+    def parse_unknown_args(unknown):
+        d = {}
+        key = None
+        for item in unknown:
+            if item.startswith('--'):
+                key = item.lstrip('-').replace('-', '_')
+                d[key] = True  # 先设为True，后面如果有值会覆盖
+            else:
+                if key:
+                    d[key] = item
+                    key = None
+        return d
+    extra_args = parse_unknown_args(unknown)
+
     # 设置输出目录
     output_dir = args.output_dir
     if not output_dir:
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = args.date if args.date else datetime.now().strftime('%Y-%m-%d')
         output_dir = os.path.join('data', 'daily', today)
     
     # 确保输出目录存在
@@ -103,10 +122,37 @@ def main():
     # 加载配置
     config = load_config(args.site, args.config)
     
-    # 运行爬虫
+    # 运行爬虫（自动透传extra_args）
     logger.info(f"开始运行爬虫: {args.site}")
-    result = run_scraper(args.site, config, output_dir)
+    result = run_scraper(args.site, config, output_dir, **extra_args)
     
+    # 处理输出文件、状态文件、日志文件参数（如有）
+    if args.output and result and result.get('output_path'):
+        import shutil
+        try:
+            shutil.copy(result['output_path'], args.output)
+            logger.info(f"已将输出文件保存为: {args.output}")
+        except Exception as e:
+            logger.warning(f"输出文件保存失败: {e}")
+    if args.status and result:
+        try:
+            import json
+            with open(args.status, 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            logger.info(f"已将状态信息保存为: {args.status}")
+        except Exception as e:
+            logger.warning(f"状态文件保存失败: {e}")
+    if args.log_file:
+        try:
+            fh = logging.FileHandler(args.log_file, encoding='utf-8')
+            fh.setLevel(logging.INFO)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            fh.setFormatter(formatter)
+            logger.addHandler(fh)
+            logger.info(f"日志已追加到: {args.log_file}")
+        except Exception as e:
+            logger.warning(f"日志文件追加失败: {e}")
+
     if result and result.get('status') == 'success':
         logger.info(f"爬虫运行成功，获取了 {result.get('count')} 条数据")
         return 0
