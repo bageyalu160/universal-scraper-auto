@@ -1,144 +1,60 @@
-name: 更新监控仪表盘
-
-run-name: "📊 更新监控仪表盘 (${{ github.actor }})"
-
+name: 仪表盘更新
+run-name: '📊 仪表盘更新 #${{ github.run_number }} (${{ github.actor }})'
 on:
+  workflow_call: {}
   workflow_dispatch:
     inputs:
-      site_id:
-        description: "站点ID"
+      date:
+        description: 数据日期 (留空则使用当前日期)
         required: false
         type: string
-
-  schedule:
-    - cron: "0 1 * * *" # 每天凌晨1点更新
-
-  # 由其他工作流触发
-  workflow_call:
-    inputs:
-      site_id:
-        description: "站点ID"
-        required: false
-        type: string
-
 permissions:
-  contents: write # 允许推送到仓库
-  pages: write # 允许部署Pages
-  id-token: write # 允许使用OIDC
-
-# 确保同一时间只运行一个仪表盘更新
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
-
+  contents: write
+  id-token: write
+  pages: write
 jobs:
   build:
     name: 构建仪表盘
     runs-on: ubuntu-latest
-
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-
       - name: 设置Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
-          cache: "pip"
-
+          cache: pip
+          python-version: '3.10'
       - name: 安装依赖
+        run: pip install pandas pyyaml requests beautifulsoup4 jinja2
+      - id: set-date
+        name: 设置日期
         run: |
-          python -m pip install --upgrade pip
-          pip install pandas matplotlib seaborn jinja2
-
-      - name: 生成仪表盘数据
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            echo "date=${{ github.event.inputs.date }}" >> $GITHUB_OUTPUT
+          else
+            echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          fi
+      - name: 生成仪表盘
         run: |
-          python scripts/update_dashboard.py {% raw %}${{ github.event.inputs.site_id && format('--site {0}', github.event.inputs.site_id) || '--all' }}{% endraw %}
-
+          python scripts/dashboard_generator.py \
+            --date "${{ steps.set-date.outputs.date }}" \
+            --data-dir "data" \
+            --analysis-dir "analysis" \
+            --output-dir "dashboard"
       - name: 设置Pages
-        uses: actions/configure-pages@v4
-
-      - name: 构建静态文件
-        run: |
-          mkdir -p _site
-          cp -r .github/pages/dashboard/* _site/
-          cp -r status _site/data/
-          cp -r dashboard/* _site/
-
-      - name: 上传页面工件
+        uses: actions/configure-pages@v3
+      - name: 上传Pages构建产物
         uses: actions/upload-pages-artifact@v2
         with:
-          path: "_site"
-
+          path: dashboard
   deploy:
     name: 部署仪表盘
     needs: build
     runs-on: ubuntu-latest
-
-    # 环境配置
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
     steps:
-      - name: 部署到GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v3
-
-  notify:
-    name: 发送部署通知
-    needs: deploy
-    runs-on: ubuntu-latest
-    if: always()
-
-    steps:
-      - name: 准备通知内容
-        id: prepare_message
-        run: |
-          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
-            echo "status=success" >> $GITHUB_OUTPUT
-            echo "message<<EOF" >> $GITHUB_OUTPUT
-            echo "### ✅ 监控仪表盘更新成功" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "- **URL**: ${{ needs.deploy.outputs.page_url }}" >> $GITHUB_OUTPUT
-            echo "- **更新时间**: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
-            echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            echo "status=failure" >> $GITHUB_OUTPUT
-            echo "message<<EOF" >> $GITHUB_OUTPUT
-            echo "### ❌ 监控仪表盘更新失败" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "- **失败阶段**: ${{ needs.deploy.result == 'failure' && 'Deployment' || 'Build' }}" >> $GITHUB_OUTPUT
-            echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          fi
-
-      - name: 检查钉钉通知配置
-        id: check_dingtalk
-        if: vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'dingtalk'
-        run: |
-          echo "has_webhook=true" >> $GITHUB_OUTPUT
-
-      - name: 发送钉钉通知
-        if: steps.check_dingtalk.outputs.has_webhook == 'true'
-        uses: fifsky/dingtalk-action@master
-        with:
-          url: ${{ secrets.DINGTALK_WEBHOOK }}
-          type: markdown
-          content: |
-            ${{ steps.prepare_message.outputs.message }}
-
-      - name: 检查企业微信配置
-        id: check_wechat
-        if: vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'wechat'
-        run: |
-          echo "has_webhook=true" >> $GITHUB_OUTPUT
-
-      - name: 发送企业微信通知
-        if: steps.check_wechat.outputs.has_webhook == 'true'
-        uses: chf007/action-wechat-work@master
-        with:
-          msgtype: markdown
-          content: ${{ steps.prepare_message.outputs.message }}
-          key: ${{ secrets.WECHAT_WEBHOOK }}
+      - id: deployment
+        name: 部署到GitHub Pages
+        uses: actions/deploy-pages@v2

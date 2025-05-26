@@ -1,23 +1,31 @@
-# 通用爬虫框架全局设置
+# Universal Scraper 全局配置文件
+# 统一管理项目的所有配置，避免重复和分散
 
-# 基本设置
-general:
-  # 默认使用的网站配置
-  default_site: "pm001"
+# =============================================================================
+# 基础运行环境配置
+# =============================================================================
+runtime:
+  # 运行模式
+  mode: "local" # "local" 或 "github"
 
-  # 运行模式: "local" (本地运行) 或 "github" (GitHub Actions)
-  run_mode: "local"
+  # GitHub Actions 运行器
+  runner: "ubuntu-latest"
 
-  # 数据存储目录
-  data_dir: "data"
+  # Python 版本
+  python_version: "3.10"
 
-  # 分析结果目录
-  analysis_dir: "analysis"
+  # 全局超时设置（分钟）
+  timeout_minutes: 30
 
-  # 状态文件目录
-  status_dir: ".status"
+  # 时区设置
+  timezone: "Asia/Shanghai"
 
-# GitHub Actions配置
+  # 调试模式
+  debug: false
+
+# =============================================================================
+# GitHub Actions 工作流配置
+# =============================================================================
 github_actions:
   # 是否启用GitHub Actions
   enabled: true
@@ -25,133 +33,301 @@ github_actions:
   # 工作流目录
   workflow_dir: ".github/workflows"
 
-  # 爬虫工作流设置
+  # Actions 版本配置
+  actions:
+    checkout: "actions/checkout@v4"
+    setup_python: "actions/setup-python@v5"
+    upload_artifact: "actions/upload-artifact@v4"
+    download_artifact: "actions/download-artifact@v4"
+    configure_pages: "actions/configure-pages@v3"
+    upload_pages_artifact: "actions/upload-pages-artifact@v2"
+    deploy_pages: "actions/deploy-pages@v2"
+    workflow_dispatch: "benc-uk/workflow-dispatch@v1"
+
+  # 权限配置模板
+  permissions:
+    standard:
+      contents: "write"
+      actions: "write"
+    pages:
+      contents: "write"
+      pages: "write"
+      id-token: "write"
+    ai:
+      models: "read"
+      issues: "write"
+      contents: "read"
+
+  # 并发控制配置
+  concurrency:
+    enabled: true
+    cancel_in_progress: true
+    group_prefix: "universal-scraper"
+
+  # 工件配置
+  artifacts:
+    default_retention_days: 7
+    retention:
+      data: 7 # 爬取数据
+      analysis: 5 # 分析结果
+      logs: 3 # 日志文件
+      status: 14 # 状态文件
+
+  # 工作流引擎配置
+  workflow_engine:
+    default_engine: "jsonnet" # "jinja2" 或 "jsonnet"
+    allow_override: true
+    jinja2:
+      strict_mode: false
+    jsonnet:
+      validate_ext_vars: true
+
+# =============================================================================
+# 调度配置
+# =============================================================================
+schedules:
+  # 主工作流（每天午夜）
+  master: "0 0 * * *"
+
+  # 代理池更新（每4小时）
+  proxy_pool: "0 */4 * * *"
+
+  # AI Issue 摘要（每6小时）
+  ai_issue_summary: "0 */6 * * *"
+
+  # 仪表盘更新（每小时）
+  dashboard: "0 * * * *"
+
+# =============================================================================
+# 路径配置
+# =============================================================================
+paths:
+  # 数据目录
+  data: "data"
+  data_daily: "data/daily"
+
+  # 分析结果目录
+  analysis: "analysis"
+  analysis_daily: "analysis/daily"
+
+  # 状态文件目录
+  status: "status"
+
+  # 日志目录
+  logs: "logs"
+
+  # 配置目录
+  config: "config"
+  config_sites: "config/sites"
+
+# =============================================================================
+# 脚本配置
+# =============================================================================
+scripts:
+  scraper: "scripts/scraper.py"
+  analyzer: "scripts/ai_analyzer.py"
+  notify: "scripts/notify.py"
+  proxy_manager: "scripts/proxy_manager.py"
+  dashboard_generator: "scripts/dashboard_generator.py"
+
+# =============================================================================
+# 依赖项配置
+# =============================================================================
+dependencies:
+  # 基础依赖（所有工作流都需要）
+  base:
+    - "requests>=2.31.0"
+    - "pyyaml>=6.0"
+    - "python-dotenv>=1.0.0"
+
+  # 爬虫相关依赖
   crawler:
-    filename: "crawler.yml"
-    # 定时运行设置 (cron格式)
-    schedule: "0 22 * * *" # 每天UTC 22:00 (约北京时间次日6:00)
+    requests:
+      - "requests>=2.31.0"
+      - "beautifulsoup4>=4.12.2"
+      - "lxml>=4.9.3"
+      - "fake-useragent>=1.0.0"
+    playwright:
+      - "playwright>=1.41.0"
+      - "beautifulsoup4>=4.12.2"
+    firecrawl:
+      - "firecrawl-py>=1.0.0"
+    selenium:
+      - "selenium>=4.9.0"
+      - "webdriver-manager>=3.8.6"
 
-  # 分析工作流设置
+  # AI 分析相关依赖
   analyzer:
-    filename: "analyzer.yml"
-    # 自动触发分析 (爬虫成功后)
-    auto_trigger: true
+    - "pandas>=2.0.3"
+    - "openai>=1.0.0"
+    - "google-generativeai>=0.3.1"
+    - "numpy>=1.22.0"
 
-# AI分析配置
+  # 通知相关依赖
+  notification:
+    - "apprise>=1.9.0"
+
+  # 代理池管理相关依赖
+  proxy_pool:
+    - "requests>=2.31.0"
+    - "schedule>=1.2.0"
+    - "tenacity>=8.2.3"
+
+  # 仪表盘相关依赖
+  dashboard:
+    - "pandas>=2.0.3"
+    - "jinja2>=3.1.0"
+    - "matplotlib>=3.7.0"
+    - "plotly>=5.14.0"
+
+# =============================================================================
+# 环境变量配置
+# =============================================================================
+environment_variables:
+  # AI 提供商相关
+  ai:
+    openai:
+      api_key: "OPENAI_API_KEY"
+    gemini:
+      api_key: "GEMINI_API_KEY"
+
+  # 通知相关
+  notification:
+    dingtalk:
+      webhook: "DINGTALK_WEBHOOK_URL"
+    feishu:
+      webhook: "FEISHU_WEBHOOK_URL"
+    wechat:
+      webhook: "WECHAT_WORK_WEBHOOK_URL"
+
+  # 代理相关
+  proxy:
+    api_key: "PROXY_API_KEY"
+    source_url: "PROXY_SOURCE_URL"
+
+  # 验证码服务相关
+  captcha:
+    api_key: "CAPTCHA_API_KEY"
+    service: "CAPTCHA_SERVICE"
+
+# =============================================================================
+# 站点配置
+# =============================================================================
+sites:
+  # 默认站点
+  default_site: "pm001"
+
+  # 站点配置目录
+  config_dir: "config/sites"
+
+# =============================================================================
+# AI 分析配置
+# =============================================================================
 analysis:
   # 是否启用AI分析
   enabled: true
 
-  # 使用的AI提供商: "gemini" (Google Gemini API) 或 "openai" (OpenAI API)
-  provider: "gemini"
+  # 使用的AI提供商
+  provider: "gemini" # "gemini" 或 "openai"
 
   # API配置
   api:
-    # API基础URL
     base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
-
-    # API密钥环境变量名
-    api_key_env: "GEMINI_API_KEY"
-
-    # 默认模型
-    model: "gemini-1.5-pro"
-
-    # 每个批次的最大记录数
-    batch_size: 100
-
-    # 最大重试次数
-    max_retry: 3
-
-    # 最大并发工作线程数
+    model: "gemini-2.5-flash"
     max_workers: 5
 
-  # 默认使用的提示词模板
+  # 批处理设置
+  batch_size: 100
+  max_retry: 3
+
+  # 提示词配置
   default_prompt: "general_prompt.txt"
+  prompt_dir: "config/analysis/prompts"
 
-  # 网站特定的提示词映射
-  site_prompts:
-    "pm001": "pm001_prompt.txt"
+  # 字段映射
+  fields:
+    date: "date"
+    analysis: "analysis"
+    category: "类别"
 
-# 全局信息
-global:
-  # 项目仓库URL
-  repo_url: "" # 为空时将自动从git配置或环境变量中检测
-
+# =============================================================================
 # 通知配置
+# =============================================================================
 notification:
   # 是否启用通知
   enabled: true
 
-  # 通知模板 - 支持的变量:
-  # {site_name} - 网站名称
-  # {total_records} - 总记录数
-  # {date_range_start} - 数据日期范围开始
-  # {date_range_end} - 数据日期范围结束
-  # {ai_analysis_title} - AI分析标题
-  # {ai_analysis_content} - AI分析内容
-  # {repo_url} - 仓库URL
+  # 通知模板
   template: |
     ### {site_name}数据更新通知
 
-    **数据概览**:
+    **基本信息**:
     - 总记录数: {total_records}
-    - 日期范围: {date_range_start} 至 {date_range_end}
+    - 数据日期: {date_range_start} - {date_range_end}
 
-    **{ai_analysis_title}**:
+    **AI分析摘要**:
     {ai_analysis_content}
 
-    **查看完整数据**: [GitHub仓库]({repo_url})
+    **详细信息**: [查看仓库]({repo_url})
 
-  # 数据字段映射配置
-  date_field: "date" # 日期字段名
-  ai_field: "analysis" # AI分析结果字段名
-  category_field: "类别" # 类别字段名
+  # 通知渠道配置
+  channels:
+    dingtalk:
+      enabled: true
+      webhook_env: "DINGTALK_WEBHOOK_URL"
+    feishu:
+      enabled: true
+      webhook_env: "FEISHU_WEBHOOK_URL"
+    wechat:
+      enabled: true
+      webhook_env: "WECHAT_WORK_WEBHOOK_URL"
 
-  # 钉钉通知
-  dingtalk:
-    enabled: true
-    webhook_url: "" # 可选: 直接设置URL，或使用webhook_env环境变量
-    webhook_env: "DINGTALK_WEBHOOK_URL"
-    secret: "" # 可选: 签名密钥
-
-  # 飞书通知
-  feishu:
-    enabled: true
-    webhook_url: "" # 可选: 直接设置URL，或使用webhook_env环境变量
-    webhook_env: "FEISHU_WEBHOOK_URL"
-
-  # 企业微信通知
-  wechat:
-    enabled: true
-    webhook_url: "" # 可选: 直接设置URL，或使用webhook_env环境变量
-    webhook_env: "WECHAT_WORK_WEBHOOK_URL"
-
-  # Apprise通知配置
-  # 可以添加任何Apprise支持的通知服务，详细服务列表：https://github.com/caronc/apprise
-  # 常用服务示例:
-  # - "tgram://bot_token/chat_id"            # Telegram
-  # - "discord://webhook_id/webhook_token"   # Discord
-  # - "mailto://user:pass@gmail.com"         # 邮件
-  # - "slack://TokenA/TokenB/TokenC"         # Slack
-  # - "pushover://user@token"                # Pushover
-  # - "pushbullet://accesstoken"             # Pushbullet
-  # - "line://token"                         # Line
+  # Apprise 扩展通知服务
   apprise_urls:
-    # - "tgram://bot_token/chat_id"  # 取消注释并填入正确的凭据以启用
+    []
+    # - "tgram://bot_token/chat_id"
     # - "discord://webhook_id/webhook_token"
     # - "mailto://user:pass@gmail.com"
-    # - "slack://TokenA/TokenB/TokenC"
 
+# =============================================================================
+# 代理池配置
+# =============================================================================
+proxy_pool:
+  # 是否启用代理
+  enabled: false
+
+  # 代理来源配置
+  sources:
+    api_key_env: "PROXY_API_KEY"
+    source_url_env: "PROXY_SOURCE_URL"
+
+  # 代理验证设置
+  validation:
+    timeout: 10
+    retry_count: 3
+
+# =============================================================================
 # 高级配置
+# =============================================================================
 advanced:
-  # 调试模式
-  debug: false
-
-  # 超时设置 (秒)
-  timeout: 600
-
   # 内存限制 (MB)
   memory_limit: 512
 
   # 临时文件清理
   cleanup_temp_files: true
+
+  # 反爬虫机制
+  anti_detect: true
+
+# =============================================================================
+# 项目信息
+# =============================================================================
+project:
+  # 项目仓库URL（为空时自动检测）
+  repo_url: ""
+
+  # 版本信息
+  version: "1.1.0"
+
+  # 项目名称
+  name: "universal-scraper"

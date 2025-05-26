@@ -323,48 +323,57 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
-        if: {% raw %}contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'){% endraw %}
         uses: actions/checkout@v4
       
-      - name: 准备通知内容
-        id: prepare_message
+      - name: 设置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: 安装依赖
         run: |
-          if [[ "{% raw %}${{ needs.analyze.result }}{% endraw %}" == "success" ]]; then
-            echo "status=success" >> $GITHUB_OUTPUT
-            echo "color=#00FF00" >> $GITHUB_OUTPUT
-            echo "message<<EOF" >> $GITHUB_OUTPUT
-            echo "### ✅ {{ site_name }}分析任务成功" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "- **站点**: {{ site_name }}" >> $GITHUB_OUTPUT
-            echo "- **日期**: {% raw %}${{ needs.pre-check.outputs.data_date }}{% endraw %}" >> $GITHUB_OUTPUT
-            echo "- **运行ID**: [#{% raw %}${{ github.run_number }}{% endraw %}]({% raw %}${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}{% endraw %})" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            echo "status=failure" >> $GITHUB_OUTPUT
-            echo "color=#FF0000" >> $GITHUB_OUTPUT
-            echo "message<<EOF" >> $GITHUB_OUTPUT
-            echo "### ❌ {{ site_name }}分析任务失败" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "- **站点**: {{ site_name }}" >> $GITHUB_OUTPUT
-            echo "- **日期**: {% raw %}${{ needs.pre-check.outputs.data_date }}{% endraw %}" >> $GITHUB_OUTPUT
-            echo "- **失败阶段**: {% raw %}${{ needs.analyze.result == 'failure' && 'Analysis' || 'Pre-Check' }}{% endraw %}" >> $GITHUB_OUTPUT
-            echo "- **运行ID**: [#{% raw %}${{ github.run_number }}{% endraw %}]({% raw %}${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}{% endraw %})" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+          pip install -r requirements.txt
+      
+      - name: 下载分析结果
+        if: {% raw %}needs.analyze.result == 'success'{% endraw %}
+        uses: actions/download-artifact@v4
+        with:
+          name: {{ site_id }}-analysis-${% raw %}{{ needs.pre-check.outputs.data_date }}{% endraw %}
+          path: temp-analysis/
+        continue-on-error: true
+      
+      - name: 准备通知内容并发送
+        env:
+          DINGTALK_WEBHOOK_URL: {% raw %}${{ secrets.DINGTALK_WEBHOOK }}{% endraw %}
+          FEISHU_WEBHOOK_URL: {% raw %}${{ secrets.FEISHU_WEBHOOK }}{% endraw %}
+          WECHAT_WORK_WEBHOOK_URL: {% raw %}${{ secrets.WECHAT_WEBHOOK }}{% endraw %}
+        run: |
+          # 查找分析结果文件
+          ANALYSIS_FILE=""
+          if [ -d "temp-analysis" ] && [ "$(ls -A temp-analysis)" ]; then
+            ANALYSIS_FILE=$(find temp-analysis -name "*.json" -o -name "*.csv" -o -name "*.tsv" | head -1)
+            echo "找到分析文件: $ANALYSIS_FILE"
           fi
-      
-      - name: 发送钉钉通知
-        if: {% raw %}vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'dingtalk' && secrets.DINGTALK_WEBHOOK != ''{% endraw %}
-        uses: fifsky/dingtalk-action@master
-        with:
-          url: {% raw %}${{ secrets.DINGTALK_WEBHOOK }}{% endraw %}
-          type: markdown
-          content: |
-            {% raw %}${{ steps.prepare_message.outputs.message }}{% endraw %}
-      
-      - name: 发送企业微信通知
-        if: {% raw %}vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'wechat' && secrets.WECHAT_WEBHOOK != ''{% endraw %}
-        uses: chf007/action-wechat-work@master
-        with:
-          msgtype: markdown
-          content: {% raw %}${{ steps.prepare_message.outputs.message }}{% endraw %}
-          key: {% raw %}${{ secrets.WECHAT_WEBHOOK }}{% endraw %} 
+          
+          # 如果没有分析文件，创建一个临时的状态文件
+          if [ -z "$ANALYSIS_FILE" ] || [ ! -f "$ANALYSIS_FILE" ]; then
+            mkdir -p temp-analysis
+            cat > temp-analysis/analyzer_status.json << EOF
+          {
+            "analyzer_status": {
+              "pre_check": "{% raw %}${{ needs.pre-check.result }}{% endraw %}",
+              "analyze": "{% raw %}${{ needs.analyze.result }}{% endraw %}",
+              "site_id": "{{ site_id }}",
+              "date": "{% raw %}${{ needs.pre-check.outputs.data_date }}{% endraw %}",
+              "run_id": "{% raw %}${{ github.run_id }}{% endraw %}",
+              "run_url": "{% raw %}${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}{% endraw %}"
+            }
+          }
+          EOF
+            ANALYSIS_FILE="temp-analysis/analyzer_status.json"
+            echo "创建状态文件: $ANALYSIS_FILE"
+          fi
+          
+          # 发送通知
+          echo "📢 发送分析任务通知..."
+          python scripts/notify.py --file "$ANALYSIS_FILE" --site "{{ site_name }}" 

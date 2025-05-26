@@ -1,0 +1,115 @@
+# 黑猫投诉 AI Issue摘要配置
+site_info:
+  name: "黑猫投诉"
+  url: "https://tousu.sina.com.cn"
+  description: "新浪黑猫消费者投诉平台"
+
+# AI Issue摘要配置
+ai_summary:
+  enabled: true
+  language: "zh-CN"
+  style: "professional"
+  include_labels: true
+
+  # 自定义提示词模板
+  custom_prompt: |
+    请用中文对以下GitHub issue进行专业摘要，重点关注黑猫投诉爬虫项目：
+
+    1. 如果是爬虫技术问题，请指出具体的技术障碍（如反爬虫、页面结构变化等）
+    2. 如果是数据分析问题，请概括分析需求和期望结果
+    3. 如果是功能请求，请明确功能用途和实现优先级
+    4. 如果是错误报告，请总结错误类型和影响范围
+    5. 保持简洁但包含关键技术细节
+
+    Issue标题: ${{ github.event.issue.title }}
+    Issue内容: ${{ github.event.issue.body }}
+
+    请以"🤖 黑猫投诉项目AI摘要："开头，并在末尾提供1-2个具体的建议操作。
+
+  # 自定义标签检测规则
+  auto_labels:
+    bug_keywords:
+      - "error"
+      - "fail"
+      - "crash"
+      - "错误"
+      - "失败"
+      - "崩溃"
+      - "bug"
+      - "异常"
+      - "超时"
+      - "无法访问"
+
+    enhancement_keywords:
+      - "feature"
+      - "enhancement"
+      - "improve"
+      - "功能"
+      - "改进"
+      - "增强"
+      - "优化"
+      - "新增"
+      - "扩展"
+
+    scraper_keywords:
+      - "scraper"
+      - "crawler"
+      - "parse"
+      - "爬虫"
+      - "抓取"
+      - "解析"
+      - "黑猫"
+      - "heimao"
+      - "投诉"
+      - "数据采集"
+
+    urgent_keywords:
+      - "urgent"
+      - "critical"
+      - "blocking"
+      - "紧急"
+      - "严重"
+      - "阻塞"
+      - "生产环境"
+      - "数据丢失"
+
+    data_keywords:
+      - "数据"
+      - "data"
+      - "分析"
+      - "analysis"
+      - "统计"
+      - "报告"
+      - "可视化"
+
+    config_keywords:
+      - "配置"
+      - "config"
+      - "设置"
+      - "参数"
+      - "环境"
+      - "部署"
+
+# 通知配置
+notification:
+  enabled: true
+  channels:
+    - type: "dingtalk"
+      webhook_secret: "DINGTALK_WEBHOOK"
+    - type: "wechat"
+      webhook_secret: "WECHAT_WEBHOOK"
+
+# 工作流配置
+workflow:
+  timeout_minutes: 10
+  retry_attempts: 2
+  auto_assign: true
+
+  # 自动分配规则
+  assignment_rules:
+    - labels: ["scraper", "heimao"]
+      assignees: ["scraper-team"]
+    - labels: ["data", "analysis"]
+      assignees: ["data-team"]
+    - labels: ["urgent", "critical"]
+      assignees: ["admin", "lead-dev"]

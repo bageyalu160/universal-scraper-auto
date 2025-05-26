@@ -260,71 +260,46 @@ jobs:
             fi
           fi
       
-      - name: 准备通知内容
-        id: prepare_message
+      - name: 准备通知内容并发送
         if: always()
+        env:
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK }}
+          WECHAT_WORK_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK }}
         run: |
+          # 创建代理池状态文件
+          mkdir -p temp-proxy-notification
+          
+          # 确定主操作和备用操作的结果
+          MAIN_SUCCESS="${{ steps.run_manager.outputs.success }}"
+          FALLBACK_SUCCESS="${{ steps.run_fallback.outputs.fallback_success }}"
+          
+          # 获取代理统计信息
+          VALID_COUNT="0"
+          FAILED_COUNT="0"
           if [ -f "status/proxies/pool_status.json" ]; then
-            valid_count=$(cat status/proxies/pool_status.json | jq '.stats.valid_count')
-            failed_count=$(cat status/proxies/pool_status.json | jq '.stats.failed_count')
-            
-            if [ "${{ steps.run_manager.outputs.success }}" == "true" ]; then
-              echo "status=success" >> $GITHUB_OUTPUT
-              echo "message<<EOF" >> $GITHUB_OUTPUT
-              echo "### ✅ 代理池管理任务完成" >> $GITHUB_OUTPUT
-              echo "" >> $GITHUB_OUTPUT
-              echo "- **操作**: ${{ steps.determine_action.outputs.action }}" >> $GITHUB_OUTPUT
-              echo "- **时间**: $(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
-              echo "- **结果**: 有效代理 $valid_count 个, 失效代理 $failed_count 个" >> $GITHUB_OUTPUT
-              echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-            elif [ "${{ steps.run_fallback.outputs.fallback_success }}" == "true" ]; then
-              echo "status=success" >> $GITHUB_OUTPUT
-              echo "message<<EOF" >> $GITHUB_OUTPUT
-              echo "### ✅ 代理池管理任务完成 (备用操作)" >> $GITHUB_OUTPUT
-              echo "" >> $GITHUB_OUTPUT
-              echo "- **主操作**: ${{ steps.determine_action.outputs.action }} (失败)" >> $GITHUB_OUTPUT
-              echo "- **备用操作**: ${{ steps.determine_action.outputs.fallback }} (成功)" >> $GITHUB_OUTPUT
-              echo "- **时间**: $(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
-              echo "- **结果**: 有效代理 $valid_count 个, 失效代理 $failed_count 个" >> $GITHUB_OUTPUT
-              echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-            else
-              echo "status=failure" >> $GITHUB_OUTPUT
-              echo "message<<EOF" >> $GITHUB_OUTPUT
-              echo "### ❌ 代理池管理任务失败" >> $GITHUB_OUTPUT
-              echo "" >> $GITHUB_OUTPUT
-              echo "- **操作**: ${{ steps.determine_action.outputs.action }}" >> $GITHUB_OUTPUT
-              if [ -n "${{ steps.determine_action.outputs.fallback }}" ]; then
-                echo "- **备用操作**: ${{ steps.determine_action.outputs.fallback }} (也失败)" >> $GITHUB_OUTPUT
-              fi
-              echo "- **时间**: $(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
-              echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "status=warning" >> $GITHUB_OUTPUT
-            echo "message<<EOF" >> $GITHUB_OUTPUT
-            echo "### ⚠️ 代理池管理任务警告" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "- **操作**: ${{ steps.determine_action.outputs.action }}" >> $GITHUB_OUTPUT
-            echo "- **问题**: 未找到代理池状态文件" >> $GITHUB_OUTPUT
-            echo "- **时间**: $(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
-            echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+            VALID_COUNT=$(cat status/proxies/pool_status.json | jq '.stats.valid_count' 2>/dev/null || echo "0")
+            FAILED_COUNT=$(cat status/proxies/pool_status.json | jq '.stats.failed_count' 2>/dev/null || echo "0")
           fi
-      
-      - name: 检查钉钉通知配置
-        id: check_dingtalk
-        if: vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'dingtalk'
-        run: |
-          echo "has_webhook=true" >> $GITHUB_OUTPUT
-      
-      - name: 发送通知
-        if: steps.check_dingtalk.outputs.has_webhook == 'true'
-        uses: fifsky/dingtalk-action@master
-        with:
-          url: ${{ secrets.DINGTALK_WEBHOOK }}
-          type: markdown
-          content: ${{ steps.prepare_message.outputs.message }}
-          at: all 
+          
+          cat > temp-proxy-notification/proxy_status.json << EOF
+          {
+            "proxy_status": {
+              "main_action": "${{ steps.determine_action.outputs.action }}",
+              "main_success": "$MAIN_SUCCESS",
+              "fallback_action": "${{ steps.determine_action.outputs.fallback }}",
+              "fallback_success": "$FALLBACK_SUCCESS",
+              "valid_count": $VALID_COUNT,
+              "failed_count": $FAILED_COUNT,
+              "proxy_source": "${{ steps.determine_action.outputs.proxy_source }}",
+              "threshold": "${{ steps.determine_action.outputs.threshold }}",
+              "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+              "run_id": "${{ github.run_id }}",
+              "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+          }
+          EOF
+          
+          # 发送通知
+          echo "📢 发送代理池管理通知..."
+          python scripts/notify.py --file "temp-proxy-notification/proxy_status.json" --site "代理池管理" 

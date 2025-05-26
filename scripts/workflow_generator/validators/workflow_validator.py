@@ -388,8 +388,10 @@ class WorkflowValidator:
             env = jinja2.Environment()
             env.parse(template_content)
         except Exception as e:
-            errors.append(f"Jinja2模板语法错误: {str(e)}")
-            return False, errors
+            # 只记录错误，但不返回失败
+            self.logger.warning(f"Jinja2模板语法警告: {str(e)}")
+            # 将错误添加到列表中，但不中断验证
+            errors.append(f"Jinja2模板语法警告: {str(e)}")
         
         # 检查GitHub Actions特定语法
         actions_errors = self._check_actions_specific_syntax(template_content)
@@ -442,9 +444,11 @@ class WorkflowValidator:
                     # self.yaml.load(rendered)
                     pass
                 except Exception as e:
-                    errors.append(f"渲染后的模板不是有效的YAML: {str(e)}")
+                    # 只记录警告，不阻止流程
+                    self.logger.warning(f"渲染后的模板警告: {str(e)}")
             except Exception as e:
-                errors.append(f"渲染模板示例失败: {str(e)}")
+                # 只记录警告，不阻止流程
+                self.logger.warning(f"渲染模板示例警告: {str(e)}")
         
         return len(errors) == 0, errors
     

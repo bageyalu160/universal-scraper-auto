@@ -1,5 +1,5 @@
-name: '"advanced_antidetect" 站点 数据分析'
-run-name: '🧠 "advanced_antidetect" 站点 数据分析 #${{ github.run_number }} (${{ github.actor }})'
+name: 黑猫投诉 数据分析
+run-name: '🧠 黑猫投诉 数据分析 #${{ github.run_number }} (${{ github.actor }})'
 on:
   workflow_dispatch:
     inputs:
@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       site_id:
-        default: '"advanced_antidetect"'
+        default: '"heimao_ai_summary"'
         description: 站点ID
         required: true
         type: string
@@ -32,7 +32,7 @@ jobs:
         run: pip install openai google-generativeai pyyaml pandas
       - name: 创建输出目录
         run: |
-          mkdir -p analysis/"advanced_antidetect"
+          mkdir -p analysis/"heimao_ai_summary"
       - env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         name: 运行分析

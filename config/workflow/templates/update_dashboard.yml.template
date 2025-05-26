@@ -92,53 +92,51 @@ jobs:
     if: always()
 
     steps:
-      - name: 准备通知内容
-        id: prepare_message
+      - name: 检出代码
+        uses: actions/checkout@v4
+        
+      - name: 设置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: 安装依赖
         run: |
+          pip install -r requirements.txt
+          
+      - name: 准备通知内容并发送
+        env:
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK }}
+          WECHAT_WORK_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK }}
+        run: |
+          # 创建仪表盘状态文件
+          mkdir -p temp-notification
           if [[ "${{ needs.deploy.result }}" == "success" ]]; then
-            echo "status=success" >> $GITHUB_OUTPUT
-            echo "message<<EOF" >> $GITHUB_OUTPUT
-            echo "### ✅ 监控仪表盘更新成功" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "- **URL**: ${{ needs.deploy.outputs.page_url }}" >> $GITHUB_OUTPUT
-            echo "- **更新时间**: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
-            echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+            cat > temp-notification/dashboard_status.json << EOF
+          {
+            "dashboard_status": {
+              "status": "success",
+              "url": "${{ needs.deploy.outputs.page_url }}",
+              "update_time": "$(date '+%Y-%m-%d %H:%M:%S')",
+              "run_id": "${{ github.run_id }}",
+              "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+          }
+          EOF
           else
-            echo "status=failure" >> $GITHUB_OUTPUT
-            echo "message<<EOF" >> $GITHUB_OUTPUT
-            echo "### ❌ 监控仪表盘更新失败" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "- **失败阶段**: ${{ needs.deploy.result == 'failure' && 'Deployment' || 'Build' }}" >> $GITHUB_OUTPUT
-            echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+            cat > temp-notification/dashboard_status.json << EOF
+          {
+            "dashboard_status": {
+              "status": "failure",
+              "failed_stage": "${{ needs.deploy.result == 'failure' && 'Deployment' || 'Build' }}",
+              "run_id": "${{ github.run_id }}",
+              "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+          }
+          EOF
           fi
-
-      - name: 检查钉钉通知配置
-        id: check_dingtalk
-        if: vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'dingtalk'
-        run: |
-          echo "has_webhook=true" >> $GITHUB_OUTPUT
-
-      - name: 发送钉钉通知
-        if: steps.check_dingtalk.outputs.has_webhook == 'true'
-        uses: fifsky/dingtalk-action@master
-        with:
-          url: ${{ secrets.DINGTALK_WEBHOOK }}
-          type: markdown
-          content: |
-            ${{ steps.prepare_message.outputs.message }}
-
-      - name: 检查企业微信配置
-        id: check_wechat
-        if: vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'wechat'
-        run: |
-          echo "has_webhook=true" >> $GITHUB_OUTPUT
-
-      - name: 发送企业微信通知
-        if: steps.check_wechat.outputs.has_webhook == 'true'
-        uses: chf007/action-wechat-work@master
-        with:
-          msgtype: markdown
-          content: ${{ steps.prepare_message.outputs.message }}
-          key: ${{ secrets.WECHAT_WEBHOOK }}
+          
+          # 发送通知
+          echo "📢 发送仪表盘更新通知..."
+          python scripts/notify.py --file "temp-notification/dashboard_status.json" --site "仪表盘"

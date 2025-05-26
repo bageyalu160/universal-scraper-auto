@@ -237,6 +237,26 @@ class Notifier:
         notification_settings = self.settings.get('notification', {})
         template = notification_settings.get('template', '分析完成，共有{total_records}条记录')
         
+        # 检查是否是工作流状态文件
+        if isinstance(self.result_data, dict) and 'workflow_status' in self.result_data:
+            return self._prepare_workflow_status_message()
+        
+        # 检查是否是仪表盘状态文件
+        if isinstance(self.result_data, dict) and 'dashboard_status' in self.result_data:
+            return self._prepare_dashboard_status_message()
+        
+        # 检查是否是爬虫状态文件
+        if isinstance(self.result_data, dict) and 'crawler_status' in self.result_data:
+            return self._prepare_crawler_status_message()
+        
+        # 检查是否是分析器状态文件
+        if isinstance(self.result_data, dict) and 'analyzer_status' in self.result_data:
+            return self._prepare_analyzer_status_message()
+        
+        # 检查是否是代理池状态文件
+        if isinstance(self.result_data, dict) and 'proxy_status' in self.result_data:
+            return self._prepare_proxy_status_message()
+        
         # 获取统计信息
         record_count = 0
         date_range_start = datetime.now().strftime('%Y-%m-%d')
@@ -337,6 +357,254 @@ class Notifier:
         except KeyError as e:
             logger.warning(f"格式化模板时出现未知变量: {e}，使用默认格式")
             message = f"### {self.site_id}数据更新通知\n\n总记录数: {record_count}\n分析日期: {datetime.now().strftime('%Y-%m-%d')}"
+        
+        return message
+    
+    def _prepare_workflow_status_message(self):
+        """准备工作流状态通知消息"""
+        workflow_status = self.result_data['workflow_status']
+        
+        # 检查整体状态
+        failed_jobs = []
+        success_jobs = []
+        skipped_jobs = []
+        
+        for job_name, result in workflow_status.items():
+            if job_name in ['date', 'sites', 'action', 'run_id', 'run_url']:
+                continue
+            
+            if result == 'success':
+                success_jobs.append(job_name)
+            elif result == 'failure':
+                failed_jobs.append(job_name)
+            elif result == 'skipped':
+                skipped_jobs.append(job_name)
+        
+        # 确定整体状态
+        if failed_jobs:
+            status_emoji = "❌"
+            status_text = "部分失败"
+        elif success_jobs:
+            status_emoji = "✅"
+            status_text = "全部完成"
+        else:
+            status_emoji = "⚠️"
+            status_text = "无结果"
+        
+        # 构建消息
+        message = f"### {status_emoji} {self.site_id}{status_text}\n\n"
+        
+        # 基本信息
+        if 'date' in workflow_status:
+            message += f"- **日期**: {workflow_status['date']}\n"
+        if 'action' in workflow_status:
+            message += f"- **操作**: {workflow_status['action']}\n"
+        if 'sites' in workflow_status:
+            sites = workflow_status['sites']
+            if isinstance(sites, list):
+                message += f"- **站点**: {', '.join(sites) if len(sites) <= 3 else f'{len(sites)}个站点'}\n"
+        
+        # 执行结果
+        message += "\n**执行结果**:\n"
+        job_names = {
+            'setup': '环境准备',
+            'proxy_pool': '代理池更新', 
+            'crawl': '数据爬取',
+            'analyze': '数据分析',
+            'dashboard': '仪表盘更新',
+            'pre_check': '预检查',
+            'analyze': '分析'
+        }
+        
+        for job_name, result in workflow_status.items():
+            if job_name in ['date', 'sites', 'action', 'run_id', 'run_url']:
+                continue
+                
+            display_name = job_names.get(job_name, job_name)
+            if result == 'success':
+                message += f"- ✅ {display_name}: 成功\n"
+            elif result == 'failure':
+                message += f"- ❌ {display_name}: 失败\n"
+            elif result == 'skipped':
+                message += f"- ⏭️ {display_name}: 跳过\n"
+            else:
+                message += f"- ⚪ {display_name}: {result}\n"
+        
+        # 运行链接
+        if 'run_url' in workflow_status:
+            run_id = workflow_status.get('run_id', '未知')
+            message += f"\n[查看详细日志]({workflow_status['run_url']})"
+        
+        return message
+    
+    def _prepare_dashboard_status_message(self):
+        """准备仪表盘状态通知消息"""
+        dashboard_status = self.result_data['dashboard_status']
+        
+        # 确定状态
+        status = dashboard_status.get('status', 'unknown')
+        if status == 'success':
+            status_emoji = "✅"
+            status_text = "更新成功"
+        elif status == 'failure':
+            status_emoji = "❌"
+            status_text = "更新失败"
+        else:
+            status_emoji = "⚠️"
+            status_text = f"状态: {status}"
+        
+        # 构建消息
+        message = f"### {status_emoji} 监控仪表盘{status_text}\n\n"
+        
+        # 基本信息
+        if status == 'success':
+            if 'url' in dashboard_status:
+                message += f"- **URL**: {dashboard_status['url']}\n"
+            if 'update_time' in dashboard_status:
+                message += f"- **更新时间**: {dashboard_status['update_time']}\n"
+        else:
+            if 'failed_stage' in dashboard_status:
+                message += f"- **失败阶段**: {dashboard_status['failed_stage']}\n"
+        
+        # 运行链接
+        if 'run_url' in dashboard_status:
+            run_id = dashboard_status.get('run_id', '未知')
+            message += f"- **运行ID**: [#{run_id}]({dashboard_status['run_url']})\n"
+        
+        return message
+    
+    def _prepare_crawler_status_message(self):
+        """准备爬虫状态通知消息"""
+        crawler_status = self.result_data['crawler_status']
+        
+        # 检查整体状态
+        pre_check_result = crawler_status.get('pre_check', 'unknown')
+        crawl_result = crawler_status.get('crawl', 'unknown')
+        
+        # 确定整体状态
+        if pre_check_result == 'success' and crawl_result == 'success':
+            status_emoji = "✅"
+            status_text = "任务成功"
+        elif pre_check_result == 'failure' or crawl_result == 'failure':
+            status_emoji = "❌"
+            status_text = "任务失败"
+        else:
+            status_emoji = "⚠️"
+            status_text = "任务状态异常"
+        
+        # 构建消息
+        site_name = self.site_id
+        message = f"### {status_emoji} {site_name}爬虫{status_text}\n\n"
+        
+        # 基本信息
+        if 'site_id' in crawler_status:
+            message += f"- **站点**: {crawler_status['site_id']}\n"
+        if 'date' in crawler_status:
+            message += f"- **日期**: {crawler_status['date']}\n"
+        
+        # 执行结果
+        message += "\n**执行结果**:\n"
+        message += f"- {'✅' if pre_check_result == 'success' else '❌'} 预检查: {pre_check_result}\n"
+        message += f"- {'✅' if crawl_result == 'success' else '❌'} 数据爬取: {crawl_result}\n"
+        
+        # 运行链接
+        if 'run_url' in crawler_status:
+            run_id = crawler_status.get('run_id', '未知')
+            message += f"\n[查看详细日志]({crawler_status['run_url']})"
+        
+        return message
+    
+    def _prepare_analyzer_status_message(self):
+        """准备分析器状态通知消息"""
+        analyzer_status = self.result_data['analyzer_status']
+        
+        # 检查整体状态
+        pre_check_result = analyzer_status.get('pre_check', 'unknown')
+        analyze_result = analyzer_status.get('analyze', 'unknown')
+        
+        # 确定整体状态
+        if pre_check_result == 'success' and analyze_result == 'success':
+            status_emoji = "✅"
+            status_text = "分析成功"
+        elif pre_check_result == 'failure' or analyze_result == 'failure':
+            status_emoji = "❌"
+            status_text = "分析失败"
+        else:
+            status_emoji = "⚠️"
+            status_text = "分析状态异常"
+        
+        # 构建消息
+        site_name = self.site_id
+        message = f"### {status_emoji} {site_name}数据{status_text}\n\n"
+        
+        # 基本信息
+        if 'site_id' in analyzer_status:
+            message += f"- **站点**: {analyzer_status['site_id']}\n"
+        if 'date' in analyzer_status:
+            message += f"- **日期**: {analyzer_status['date']}\n"
+        
+        # 执行结果
+        message += "\n**执行结果**:\n"
+        message += f"- {'✅' if pre_check_result == 'success' else '❌'} 预检查: {pre_check_result}\n"
+        message += f"- {'✅' if analyze_result == 'success' else '❌'} 数据分析: {analyze_result}\n"
+        
+        # 运行链接
+        if 'run_url' in analyzer_status:
+            run_id = analyzer_status.get('run_id', '未知')
+            message += f"\n[查看详细日志]({analyzer_status['run_url']})"
+        
+        return message
+    
+    def _prepare_proxy_status_message(self):
+        """准备代理池状态通知消息"""
+        proxy_status = self.result_data['proxy_status']
+        
+        # 检查整体状态
+        main_success = proxy_status.get('main_success', 'false') == 'true'
+        fallback_success = proxy_status.get('fallback_success', 'false') == 'true'
+        
+        # 确定整体状态
+        if main_success:
+            status_emoji = "✅"
+            status_text = "管理成功"
+        elif fallback_success:
+            status_emoji = "⚠️"
+            status_text = "备用操作成功"
+        else:
+            status_emoji = "❌"
+            status_text = "管理失败"
+        
+        # 构建消息
+        message = f"### {status_emoji} 代理池{status_text}\n\n"
+        
+        # 基本信息
+        if 'main_action' in proxy_status:
+            message += f"- **主操作**: {proxy_status['main_action']}\n"
+        if 'fallback_action' in proxy_status and proxy_status['fallback_action']:
+            message += f"- **备用操作**: {proxy_status['fallback_action']}\n"
+        if 'proxy_source' in proxy_status:
+            message += f"- **代理源**: {proxy_status['proxy_source']}\n"
+        
+        # 代理统计
+        valid_count = proxy_status.get('valid_count', 0)
+        failed_count = proxy_status.get('failed_count', 0)
+        message += f"- **代理统计**: 有效 {valid_count} 个，失效 {failed_count} 个\n"
+        
+        # 执行结果
+        message += "\n**执行结果**:\n"
+        if main_success:
+            message += f"- ✅ 主操作: {proxy_status.get('main_action', '未知')}\n"
+        else:
+            message += f"- ❌ 主操作: {proxy_status.get('main_action', '未知')}\n"
+            if fallback_success:
+                message += f"- ✅ 备用操作: {proxy_status.get('fallback_action', '未知')}\n"
+            elif proxy_status.get('fallback_action'):
+                message += f"- ❌ 备用操作: {proxy_status.get('fallback_action', '未知')}\n"
+        
+        # 运行链接
+        if 'run_url' in proxy_status:
+            run_id = proxy_status.get('run_id', '未知')
+            message += f"\n[查看详细日志]({proxy_status['run_url']})"
         
         return message
     

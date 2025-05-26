@@ -2,7 +2,7 @@ name: 黑猫投诉 爬虫
 run-name: '🕷️ 黑猫投诉 爬虫 #${{ github.run_number }} (${{ github.actor }})'
 on:
   schedule:
-    - cron: 0 9 * * *
+    - cron: 0 */6 * * *
   workflow_dispatch:
     inputs:
       date:
@@ -16,7 +16,7 @@ on:
         type: boolean
 concurrency:
   cancel-in-progress: true
-  group: crawler-"heimao"-${{ github.ref }}
+  group: crawler-"heimao_ai_summary"-${{ github.ref }}
 jobs:
   crawl:
     name: 运行爬虫
@@ -49,15 +49,15 @@ jobs:
           fi
       - name: 创建输出目录
         run: |
-          mkdir -p data/"heimao"
-          mkdir -p status/"heimao"
+          mkdir -p data/"heimao_ai_summary"
+          mkdir -p status/"heimao_ai_summary"
           mkdir -p logs
       - continue-on-error: true
         env: {}
         id: run_scraper
         name: 运行爬虫
         run: |
-          echo "🕷️ 开始爬取数据: "heimao""
+          echo "🕷️ 开始爬取数据: "heimao_ai_summary""
           echo "📅 运行日期: $RUN_DATE"
           echo "🔄 使用代理: $USE_PROXY"
 
@@ -70,15 +70,15 @@ jobs:
 
           # 执行爬虫
           python scripts/scraper.py \
-            --site "heimao" \
+            --site "heimao_ai_summary" \
             --date "$RUN_DATE" \
-            --output "data/"heimao"/heimao_data.json" \
-            --status "status/"heimao"/status.json" \
-            --log-file "logs/"heimao"_$RUN_DATE.log" \
+            --output "data/"heimao_ai_summary"/"heimao_ai_summary"_data.json" \
+            --status "status/"heimao_ai_summary"/status.json" \
+            --log-file "logs/"heimao_ai_summary"_$RUN_DATE.log" \
             $PROXY_ARG
 
           # 检查结果
-          if [ -f "data/"heimao"/heimao_data.json" ]; then
+          if [ -f "data/"heimao_ai_summary"/"heimao_ai_summary"_data.json" ]; then
             echo "scraper_success=true" >> $GITHUB_OUTPUT
             echo "✅ 爬虫执行成功"
           else
@@ -89,20 +89,20 @@ jobs:
         name: 上传数据文件
         uses: actions/upload-artifact@v4
         with:
-          name: '"heimao"-data-${{ needs.pre-check.outputs.run_date }}'
-          path: data/"heimao"/heimao_data.json
+          name: '"heimao_ai_summary"-data-${{ needs.pre-check.outputs.run_date }}'
+          path: data/"heimao_ai_summary"/"heimao_ai_summary"_data.json
           retention-days: 7
       - name: 上传状态文件
         uses: actions/upload-artifact@v4
         with:
-          name: '"heimao"-status-${{ needs.pre-check.outputs.run_date }}'
-          path: status/"heimao"/status.json
+          name: '"heimao_ai_summary"-status-${{ needs.pre-check.outputs.run_date }}'
+          path: status/"heimao_ai_summary"/status.json
           retention-days: 7
       - name: 上传日志文件
         uses: actions/upload-artifact@v4
         with:
-          name: '"heimao"-logs-${{ needs.pre-check.outputs.run_date }}'
-          path: logs/"heimao"_${{ needs.pre-check.outputs.run_date }}.log
+          name: '"heimao_ai_summary"-logs-${{ needs.pre-check.outputs.run_date }}'
+          path: logs/"heimao_ai_summary"_${{ needs.pre-check.outputs.run_date }}.log
           retention-days: 3
       - name: 提交结果和状态
         run: |
@@ -111,8 +111,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           # 添加文件
-          git add data/"heimao"/
-          git add status/"heimao"/
+          git add data/"heimao_ai_summary"/
+          git add status/"heimao_ai_summary"/
 
           # 提交更改
           if git diff --staged --quiet; then
@@ -221,7 +221,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "没有代理池状态变更，无需提交"
           else
-            git commit -m "🔄 爬虫任务前的代理池更新 (站点: "heimao")"
+            git commit -m "🔄 爬虫任务前的代理池更新 (站点: "heimao_ai_summary")"
             git push
             echo "✅ 成功提交代理池状态更新"
           fi
@@ -251,9 +251,9 @@ jobs:
           # 生成缓存键
           if [ -f "requirements.txt" ]; then
             HASH=$(sha256sum requirements.txt | cut -d ' ' -f 1 | head -c 8)
-            echo "cache_key=deps-"heimao"-$HASH-v1" >> $GITHUB_OUTPUT
+            echo "cache_key=deps-"heimao_ai_summary"-$HASH-v1" >> $GITHUB_OUTPUT
           else
-            echo "cache_key=deps-"heimao"-default-v1" >> $GITHUB_OUTPUT
+            echo "cache_key=deps-"heimao_ai_summary"-default-v1" >> $GITHUB_OUTPUT
           fi
 
           # 设置是否使用代理
@@ -263,7 +263,7 @@ jobs:
       - id: validate_config
         name: 验证站点配置
         run: |
-          if [ -f "config/sites/"heimao".yaml" ]; then
+          if [ -f "config/sites/"heimao_ai_summary".yaml" ]; then
             echo "✅ 站点配置有效"
             echo "valid=true" >> $GITHUB_OUTPUT
           else

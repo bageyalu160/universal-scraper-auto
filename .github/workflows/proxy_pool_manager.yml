@@ -1,73 +1,58 @@
-name: 代理池管理器
-
-run-name: "🔄 代理池更新 #${{ github.run_number }} (${{ github.actor }})"
-
+name: 代理池管理
+run-name: '🔄 代理池管理 #${{ github.run_number }} (${{ github.actor }})'
 on:
-  # 定时触发：每4小时运行一次
   schedule:
-    - cron: "0 */4 * * *"
-  
-  # 手动触发
+    - cron: 0 0 * * *
+  workflow_call:
+    inputs:
+      action:
+        default: update
+        description: 执行操作
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       action:
-        description: '执行操作'
+        default: update
+        description: 执行操作
+        options:
+          - update
+          - validate
+          - clean
+          - rebuild
         required: true
         type: choice
-        options:
-          - update # 更新代理池
-          - validate # 验证现有代理
-          - clear # 清空失败的代理
-          - rebuild # 完全重建代理池
-          - recover # 尝试恢复失败的代理
-      proxy_source:
-        description: '代理源类型 (留空则使用所有配置源)'
-        required: false
-        type: choice
-        options:
-          - all
-          - api
-          - file
-      threshold:
-        description: '触发恢复的代理数量阈值(默认为5)'
-        required: false
-        type: number
-        default: 5
-      debug:
-        description: '调试模式'
+      force_update:
+        default: false
+        description: 强制更新代理池
         required: false
         type: boolean
-        default: false
-
-env:
-  PYTHON_VERSION: "3.10"
-  TZ: "Asia/Shanghai"
-
-permissions:
-  contents: write
-  actions: write
-
-defaults:
-  run:
-    shell: bash
-
+      pool_size:
+        default: 20
+        description: 代理池大小 (仅适用于更新操作)
+        required: false
+        type: number
+concurrency:
+  cancel-in-progress: true
+  group: proxy-pool-management
 jobs:
-  proxy-pool-management:
-    name: 管理代理池
+  manage_proxy_pool:
+    name: 执行代理池管理
+    if: needs.pre-check.outputs.action != 'skip'
+    needs:
+      - pre-check
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 30
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 获取完整历史记录，用于访问代理池状态
-      
+          fetch-depth: 0
       - name: 设置Python环境
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      
+          cache: pip
+          python-version: '3.10'
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
@@ -75,256 +60,333 @@ jobs:
             pip install -r requirements.txt
           else
             echo "安装必要的依赖..."
-            pip install requests pyyaml pandas
+            pip install requests beautifulsoup4 pyyaml schedule
           fi
-      
+      - name: 创建代理池目录
+        run: |
+          mkdir -p data/proxies
+          mkdir -p status/proxies
+          mkdir -p logs
+      - if: needs.pre-check.outputs.current_status != 'missing'
+        name: 备份现有代理池
+        run: |
+          if [ -f "data/proxies/proxy_pool.json" ]; then
+            cp data/proxies/proxy_pool.json data/proxies/proxy_pool_backup_$(date +%Y%m%d_%H%M%S).json
+            echo "✅ 已备份现有代理池"
+          fi
+
+          if [ -f "status/proxies/pool_status.json" ]; then
+            cp status/proxies/pool_status.json status/proxies/pool_status_backup_$(date +%Y%m%d_%H%M%S).json
+            echo "✅ 已备份现有状态文件"
+          fi
+      - continue-on-error: true
+        id: update_proxy
+        if: needs.pre-check.outputs.action == 'update' || needs.pre-check.outputs.action == 'rebuild'
+        name: 更新代理池
+        run: |
+          echo "🔄 开始更新代理池..."
+
+          ACTION="${{ needs.pre-check.outputs.action }}"
+          POOL_SIZE="${{ github.event.inputs.pool_size || '20' }}"
+
+          # 设置日志文件
+          LOG_FILE="logs/proxy_update_$(date +%Y%m%d_%H%M%S).log"
+
+          # 执行更新
+          if [ "$ACTION" = "rebuild" ]; then
+            echo "🔧 重建代理池..."
+            python scripts/proxy_manager.py rebuild \
+              --output data/proxies/proxy_pool.json \
+              --status status/proxies/pool_status.json \
+              --size "$POOL_SIZE" \
+              --log-file "$LOG_FILE" \
+              --validate
+          else
+            echo "🔄 更新代理池..."
+            python scripts/proxy_manager.py update \
+              --output data/proxies/proxy_pool.json \
+              --status status/proxies/pool_status.json \
+              --size "$POOL_SIZE" \
+              --log-file "$LOG_FILE" \
+              --validate
+          fi
+
+          # 检查执行结果
+          if [ $? -eq 0 ]; then
+            echo "update_success=true" >> $GITHUB_OUTPUT
+            echo "✅ 代理池更新成功"
+          else
+            echo "update_success=false" >> $GITHUB_OUTPUT
+            echo "❌ 代理池更新失败"
+          fi
+      - continue-on-error: true
+        id: validate_proxy
+        if: needs.pre-check.outputs.action == 'validate' || steps.update_proxy.outputs.update_success == 'true'
+        name: 验证代理池
+        run: |
+          echo "🔍 验证代理池..."
+
+          if [ ! -f "data/proxies/proxy_pool.json" ]; then
+            echo "❌ 代理池文件不存在，无法验证"
+            echo "validate_success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          # 设置日志文件
+          LOG_FILE="logs/proxy_validate_$(date +%%Y%%m%%d_%%H%%M%%S).log"
+
+          # 执行验证
+          python scripts/proxy_manager.py validate \
+            --input data/proxies/proxy_pool.json \
+            --output data/proxies/proxy_pool_validated.json \
+            --status status/proxies/pool_status.json \
+            --log-file "$LOG_FILE"
+
+          # 检查验证结果
+          if [ $? -eq 0 ] && [ -f "data/proxies/proxy_pool_validated.json" ]; then
+            # 替换原始代理池文件
+            mv data/proxies/proxy_pool_validated.json data/proxies/proxy_pool.json
+            echo "validate_success=true" >> $GITHUB_OUTPUT
+            echo "✅ 代理池验证成功"
+          else
+            echo "validate_success=false" >> $GITHUB_OUTPUT
+            echo "❌ 代理池验证失败"
+          fi
+      - continue-on-error: true
+        id: clean_proxy
+        if: needs.pre-check.outputs.action == 'clean'
+        name: 清理代理池
+        run: |
+          echo "🧹 清理代理池..."
+
+          if [ ! -f "data/proxies/proxy_pool.json" ]; then
+            echo "❌ 代理池文件不存在，无法清理"
+            echo "clean_success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          # 设置日志文件
+          LOG_FILE="logs/proxy_clean_$(date +%%Y%%m%%d_%%H%%M%%S).log"
+
+          # 执行清理
+          python scripts/proxy_manager.py clean \
+            --input data/proxies/proxy_pool.json \
+            --output data/proxies/proxy_pool_cleaned.json \
+            --status status/proxies/pool_status.json \
+            --log-file "$LOG_FILE"
+
+          # 检查清理结果
+          if [ $? -eq 0 ] && [ -f "data/proxies/proxy_pool_cleaned.json" ]; then
+            # 替换原始代理池文件
+            mv data/proxies/proxy_pool_cleaned.json data/proxies/proxy_pool.json
+            echo "clean_success=true" >> $GITHUB_OUTPUT
+            echo "✅ 代理池清理成功"
+          else
+            echo "clean_success=false" >> $GITHUB_OUTPUT
+            echo "❌ 代理池清理失败"
+          fi
+      - if: failure() && needs.pre-check.outputs.current_status != 'missing'
+        name: 恢复代理池（如果操作失败）
+        run: |
+          echo "💡 尝试恢复代理池..."
+
+          # 查找最新的备份文件
+          LATEST_BACKUP=$(ls -t data/proxies/proxy_pool_backup_*.json 2>/dev/null | head -1)
+          LATEST_STATUS_BACKUP=$(ls -t status/proxies/pool_status_backup_*.json 2>/dev/null | head -1)
+
+          if [ -n "$LATEST_BACKUP" ] && [ -f "$LATEST_BACKUP" ]; then
+            cp "$LATEST_BACKUP" data/proxies/proxy_pool.json
+            echo "✅ 已从备份恢复代理池文件"
+          fi
+
+          if [ -n "$LATEST_STATUS_BACKUP" ] && [ -f "$LATEST_STATUS_BACKUP" ]; then
+            cp "$LATEST_STATUS_BACKUP" status/proxies/pool_status.json
+            echo "✅ 已从备份恢复状态文件"
+          fi
+
+          # 清理备份文件（保留最新的3个）
+          ls -t data/proxies/proxy_pool_backup_*.json 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
+          ls -t status/proxies/pool_status_backup_*.json 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
+      - id: final_status
+        name: 生成最终状态报告
+        run: |
+          echo "📊 生成最终状态报告..."
+
+          # 检查最终状态
+          if [ -f "status/proxies/pool_status.json" ]; then
+            if command -v jq >/dev/null 2>&1; then
+              FINAL_VALID_COUNT=$(jq -r '.stats.valid_count // 0' status/proxies/pool_status.json)
+              FINAL_TOTAL_COUNT=$(jq -r '.stats.total_count // 0' status/proxies/pool_status.json)
+              FINAL_STATUS=$(jq -r '.status // "unknown"' status/proxies/pool_status.json)
+            else
+              FINAL_VALID_COUNT=$(grep -o '"valid_count":[0-9]*' status/proxies/pool_status.json | grep -o '[0-9]*' | head -1)
+              FINAL_TOTAL_COUNT=$(grep -o '"total_count":[0-9]*' status/proxies/pool_status.json | grep -o '[0-9]*' | head -1)
+              FINAL_STATUS="updated"
+            fi
+            
+            echo "最终有效代理数: $FINAL_VALID_COUNT"
+            echo "总代理数: $FINAL_TOTAL_COUNT"
+            echo "最终状态: $FINAL_STATUS"
+            
+            # 设置输出
+            echo "final_valid_count=$FINAL_VALID_COUNT" >> $GITHUB_OUTPUT
+            echo "final_total_count=$FINAL_TOTAL_COUNT" >> $GITHUB_OUTPUT
+            echo "final_status=$FINAL_STATUS" >> $GITHUB_OUTPUT
+            
+            # 判断是否成功
+            if [ "$FINAL_VALID_COUNT" -ge "5" ]; then
+              echo "operation_success=true" >> $GITHUB_OUTPUT
+              echo "✅ 代理池操作成功完成"
+            else
+              echo "operation_success=false" >> $GITHUB_OUTPUT
+              echo "⚠️ 代理池操作完成但代理数量不足"
+            fi
+          else
+            echo "operation_success=false" >> $GITHUB_OUTPUT
+            echo "❌ 未找到最终状态文件"
+          fi
+      - if: always()
+        name: 上传代理池文件
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-pool-${{ github.run_number }}
+          path: "data/proxies/proxy_pool.json\nstatus/proxies/pool_status.json\nlogs/proxy_*.log\n"
+          retention-days: 7
+      - if: steps.final_status.outputs.operation_success == 'true'
+        name: 提交代理池更新
+        run: |
+          # 配置Git
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 添加文件
+          git add data/proxies/proxy_pool.json
+          git add status/proxies/pool_status.json
+
+          # 提交更改
+          if git diff --staged --quiet; then
+            echo "没有代理池变更，无需提交"
+          else
+            ACTION="${{ needs.pre-check.outputs.action }}"
+            VALID_COUNT="${{ steps.final_status.outputs.final_valid_count }}"
+            
+            git commit -m "🤖 自动更新: 代理池管理 (动作: $ACTION, 有效代理: $VALID_COUNT)"
+            git push
+            echo "✅ 成功提交代理池更新"
+          fi
+  notify:
+    name: 发送操作通知
+    if: always()
+    needs:
+      - pre-check
+      - manage_proxy_pool
+    runs-on: ubuntu-latest
+    steps:
+      - id: prepare_message
+        name: 准备通知内容
+        run: |
+          ACTION="${{ needs.pre-check.outputs.action }}"
+
+          if [ "$ACTION" = "skip" ]; then
+            echo "status=skipped" >> $GITHUB_OUTPUT
+            echo "message=代理池状态良好，跳过更新操作" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.manage_proxy_pool.result }}" = "success" ]; then
+            VALID_COUNT="${{ needs.manage_proxy_pool.outputs.final_valid_count || '未知' }}"
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "message=代理池$ACTION操作成功完成，当前有效代理: $VALID_COUNT" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "message=代理池$ACTION操作失败" >> $GITHUB_OUTPUT
+          fi
+  pre-check:
+    name: 代理池状态检查
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.determine_action.outputs.action }}
+      current_status: ${{ steps.check_status.outputs.status }}
+      needs_update: ${{ steps.check_status.outputs.needs_update }}
+      valid_count: ${{ steps.check_status.outputs.valid_count }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
       - name: 创建必要目录
         run: |
           mkdir -p data/proxies
           mkdir -p status/proxies
           mkdir -p logs
-          
-      - name: 加载历史代理状态
-        id: load_history
+      - id: check_status
+        name: 检查当前代理池状态
         run: |
-          # 检查代理状态文件是否存在
+          echo "🔍 检查代理池状态..."
+
+          # 初始化变量
+          VALID_COUNT=0
+          STATUS="unknown"
+          NEEDS_UPDATE="false"
+
+          # 检查状态文件
           if [ -f "status/proxies/pool_status.json" ]; then
-            echo "发现历史代理池状态文件"
-            echo "history_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ 发现代理池状态文件"
             
-            # 获取代理数量统计
-            valid_count=$(cat status/proxies/pool_status.json | jq '.stats.valid_count')
-            failed_count=$(cat status/proxies/pool_status.json | jq '.stats.failed_count')
-            
-            echo "历史代理统计: 有效代理 $valid_count 个, 失效代理 $failed_count 个"
-            echo "valid_count=$valid_count" >> $GITHUB_OUTPUT
-            echo "failed_count=$failed_count" >> $GITHUB_OUTPUT
-          else
-            echo "未发现历史代理池状态"
-            echo "history_exists=false" >> $GITHUB_OUTPUT
-            echo "valid_count=0" >> $GITHUB_OUTPUT
-            echo "failed_count=0" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: 确定操作类型
-        id: determine_action
-        run: |
-          # 获取用户指定的操作或使用默认操作
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            ACTION="${{ github.event.inputs.action }}"
-          else
-            # 根据历史状态决定默认操作
-            if [ "${{ steps.load_history.outputs.valid_count }}" -lt "10" ]; then
-              # 如果代理数量少于10，首先尝试恢复，如果恢复不成功再重建
-              ACTION="recover"
-              FALLBACK="rebuild"
+            # 解析状态信息
+            if command -v jq >/dev/null 2>&1; then
+              VALID_COUNT=$(jq -r '.stats.valid_count // 0' status/proxies/pool_status.json)
+              LAST_UPDATE=$(jq -r '.last_update // ""' status/proxies/pool_status.json)
+              STATUS=$(jq -r '.status // "unknown"' status/proxies/pool_status.json)
             else
-              ACTION="update"
-              FALLBACK="validate"
-            fi
-          fi
-          
-          echo "执行操作: $ACTION"
-          echo "action=$ACTION" >> $GITHUB_OUTPUT
-          
-          # 确定备用操作
-          if [ -n "$FALLBACK" ]; then
-            echo "备用操作: $FALLBACK"
-            echo "fallback=$FALLBACK" >> $GITHUB_OUTPUT
-          fi
-          
-          # 确定代理源
-          if [ "${{ github.event.inputs.proxy_source }}" == "" ] || [ "${{ github.event.inputs.proxy_source }}" == "all" ]; then
-            PROXY_SOURCE="all"
-          else
-            PROXY_SOURCE="${{ github.event.inputs.proxy_source }}"
-          fi
-          
-          echo "代理源: $PROXY_SOURCE"
-          echo "proxy_source=$PROXY_SOURCE" >> $GITHUB_OUTPUT
-          
-          # 确定阈值
-          if [ "${{ github.event.inputs.threshold }}" == "" ]; then
-            THRESHOLD=5
-          else
-            THRESHOLD="${{ github.event.inputs.threshold }}"
-          fi
-          
-          echo "恢复阈值: $THRESHOLD"
-          echo "threshold=$THRESHOLD" >> $GITHUB_OUTPUT
-      
-      - name: 运行代理池管理脚本
-        id: run_manager
-        env:
-          PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
-          PROXY_SOURCE_URL: ${{ secrets.PROXY_SOURCE_URL }}
-          DEBUG_MODE: ${{ github.event.inputs.debug || 'false' }}
-        run: |
-          # 设置调试模式
-          if [ "$DEBUG_MODE" == "true" ]; then
-            export LOG_LEVEL=DEBUG
-          fi
-          
-          # 运行对应操作的脚本
-          echo "执行操作: ${{ steps.determine_action.outputs.action }}"
-          python scripts/proxy_manager.py --action ${{ steps.determine_action.outputs.action }} --source ${{ steps.determine_action.outputs.proxy_source }} --threshold ${{ steps.determine_action.outputs.threshold }}
-          
-          # 检查执行结果
-          exit_code=$?
-          if [ $exit_code -eq 0 ]; then
-            echo "✅ 代理池管理脚本执行成功"
-            echo "success=true" >> $GITHUB_OUTPUT
-            
-            # 检查代理数量是否满足最低要求
-            if [ -f "status/proxies/pool_status.json" ]; then
-              valid_count=$(cat status/proxies/pool_status.json | jq '.stats.valid_count')
-              threshold="${{ steps.determine_action.outputs.threshold }}"
-              
-              if [ "$valid_count" -lt "$threshold" ] && [ "${{ steps.determine_action.outputs.action }}" == "recover" ]; then
-                echo "⚠️ 恢复后代理数量仍低于阈值，需要执行备用操作"
-                echo "need_fallback=true" >> $GITHUB_OUTPUT
-              else
-                echo "need_fallback=false" >> $GITHUB_OUTPUT
+              # 没有jq时的简单解析
+              VALID_COUNT=$(grep -o '"valid_count":[0-9]*' status/proxies/pool_status.json | grep -o '[0-9]*' | head -1)
+              if [ -z "$VALID_COUNT" ]; then
+                VALID_COUNT=0
               fi
             fi
-          else
-            echo "❌ 代理池管理脚本执行失败 (退出代码: $exit_code)"
-            echo "success=false" >> $GITHUB_OUTPUT
             
-            # 如果主操作失败且有备用操作，标记需要执行备用操作
-            if [ -n "${{ steps.determine_action.outputs.fallback }}" ]; then
-              echo "⚠️ 主操作失败，需要执行备用操作"
-              echo "need_fallback=true" >> $GITHUB_OUTPUT
+            echo "当前有效代理数: $VALID_COUNT"
+            echo "当前状态: $STATUS"
+            
+            # 判断是否需要更新
+            if [ "$VALID_COUNT" -lt "5" ]; then
+              NEEDS_UPDATE="true"
+              echo "⚠️ 代理数量不足，需要更新"
             else
-              echo "need_fallback=false" >> $GITHUB_OUTPUT
+              echo "✅ 代理数量充足"
             fi
+          else
+            echo "⚠️ 未找到代理池状态文件"
+            STATUS="missing"
+            NEEDS_UPDATE="true"
           fi
 
-      - name: 运行备用操作
-        if: (steps.run_manager.outputs.success == 'false' || steps.run_manager.outputs.need_fallback == 'true') && steps.determine_action.outputs.fallback != ''
-        id: run_fallback
-        env:
-          PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
-          PROXY_SOURCE_URL: ${{ secrets.PROXY_SOURCE_URL }}
-          DEBUG_MODE: ${{ github.event.inputs.debug || 'false' }}
-        run: |
-          echo "执行备用操作: ${{ steps.determine_action.outputs.fallback }}"
-          python scripts/proxy_manager.py --action ${{ steps.determine_action.outputs.fallback }} --source ${{ steps.determine_action.outputs.proxy_source }} --threshold ${{ steps.determine_action.outputs.threshold }}
-          
-          # 检查执行结果
-          exit_code=$?
-          if [ $exit_code -eq 0 ]; then
-            echo "✅ 备用操作执行成功"
-            echo "fallback_success=true" >> $GITHUB_OUTPUT
-          else
-            echo "❌ 备用操作执行失败 (退出代码: $exit_code)"
-            echo "fallback_success=false" >> $GITHUB_OUTPUT
+          # 检查代理池文件
+          if [ ! -f "data/proxies/proxy_pool.json" ]; then
+            echo "⚠️ 代理池文件不存在"
+            STATUS="missing"
+            NEEDS_UPDATE="true"
           fi
-      
-      - name: 提交代理池状态
-        if: steps.run_manager.outputs.success == 'true' || steps.run_fallback.outputs.fallback_success == 'true'
+
+          # 设置输出
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "valid_count=$VALID_COUNT" >> $GITHUB_OUTPUT
+          echo "needs_update=$NEEDS_UPDATE" >> $GITHUB_OUTPUT
+      - id: determine_action
+        name: 确定执行动作
         run: |
-          # 配置Git
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # 添加状态文件
-          git add status/proxies/pool_status.json
-          git add data/proxies/
-          
-          # 提交更改
-          if git diff --staged --quiet; then
-            echo "没有代理池状态变更，无需提交"
+          # 获取输入动作
+          INPUT_ACTION="${{ github.event.inputs.action || inputs.action || 'update' }}"
+          FORCE_UPDATE="${{ github.event.inputs.force_update || 'false' }}"
+          NEEDS_UPDATE="${{ steps.check_status.outputs.needs_update }}"
+
+          echo "输入动作: $INPUT_ACTION"
+          echo "强制更新: $FORCE_UPDATE"
+          echo "需要更新: $NEEDS_UPDATE"
+
+          # 确定最终动作
+          if [ "$INPUT_ACTION" = "update" ] && [ "$NEEDS_UPDATE" = "false" ] && [ "$FORCE_UPDATE" = "false" ]; then
+            FINAL_ACTION="skip"
+            echo "📋 代理池状态良好，跳过更新"
           else
-            # 获取当前代理统计
-            if [ -f "status/proxies/pool_status.json" ]; then
-              valid_count=$(cat status/proxies/pool_status.json | jq '.stats.valid_count')
-              failed_count=$(cat status/proxies/pool_status.json | jq '.stats.failed_count')
-              
-              # 创建提交信息
-              commit_msg="🔄 自动更新: 代理池状态"
-              
-              if [ "${{ steps.run_manager.outputs.success }}" == "true" ]; then
-                commit_msg="${commit_msg} (操作:${{ steps.determine_action.outputs.action }})"
-              elif [ "${{ steps.run_fallback.outputs.fallback_success }}" == "true" ]; then
-                commit_msg="${commit_msg} (操作:${{ steps.determine_action.outputs.fallback }})"
-              fi
-              
-              commit_msg="${commit_msg} (有效:$valid_count, 失效:$failed_count)"
-              
-              git commit -m "$commit_msg"
-              git push
-              echo "✅ 成功提交代理池状态更新"
-            else
-              echo "⚠️ 未找到代理池状态文件，跳过提交"
-            fi
+            FINAL_ACTION="$INPUT_ACTION"
+            echo "📋 将执行动作: $FINAL_ACTION"
           fi
-      
-      - name: 准备通知内容
-        id: prepare_message
-        if: always()
-        run: |
-          if [ -f "status/proxies/pool_status.json" ]; then
-            valid_count=$(cat status/proxies/pool_status.json | jq '.stats.valid_count')
-            failed_count=$(cat status/proxies/pool_status.json | jq '.stats.failed_count')
-            
-            if [ "${{ steps.run_manager.outputs.success }}" == "true" ]; then
-              echo "status=success" >> $GITHUB_OUTPUT
-              echo "message<<EOF" >> $GITHUB_OUTPUT
-              echo "### ✅ 代理池管理任务完成" >> $GITHUB_OUTPUT
-              echo "" >> $GITHUB_OUTPUT
-              echo "- **操作**: ${{ steps.determine_action.outputs.action }}" >> $GITHUB_OUTPUT
-              echo "- **时间**: $(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
-              echo "- **结果**: 有效代理 $valid_count 个, 失效代理 $failed_count 个" >> $GITHUB_OUTPUT
-              echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-            elif [ "${{ steps.run_fallback.outputs.fallback_success }}" == "true" ]; then
-              echo "status=success" >> $GITHUB_OUTPUT
-              echo "message<<EOF" >> $GITHUB_OUTPUT
-              echo "### ✅ 代理池管理任务完成 (备用操作)" >> $GITHUB_OUTPUT
-              echo "" >> $GITHUB_OUTPUT
-              echo "- **主操作**: ${{ steps.determine_action.outputs.action }} (失败)" >> $GITHUB_OUTPUT
-              echo "- **备用操作**: ${{ steps.determine_action.outputs.fallback }} (成功)" >> $GITHUB_OUTPUT
-              echo "- **时间**: $(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
-              echo "- **结果**: 有效代理 $valid_count 个, 失效代理 $failed_count 个" >> $GITHUB_OUTPUT
-              echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-            else
-              echo "status=failure" >> $GITHUB_OUTPUT
-              echo "message<<EOF" >> $GITHUB_OUTPUT
-              echo "### ❌ 代理池管理任务失败" >> $GITHUB_OUTPUT
-              echo "" >> $GITHUB_OUTPUT
-              echo "- **操作**: ${{ steps.determine_action.outputs.action }}" >> $GITHUB_OUTPUT
-              if [ -n "${{ steps.determine_action.outputs.fallback }}" ]; then
-                echo "- **备用操作**: ${{ steps.determine_action.outputs.fallback }} (也失败)" >> $GITHUB_OUTPUT
-              fi
-              echo "- **时间**: $(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
-              echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "status=warning" >> $GITHUB_OUTPUT
-            echo "message<<EOF" >> $GITHUB_OUTPUT
-            echo "### ⚠️ 代理池管理任务警告" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "- **操作**: ${{ steps.determine_action.outputs.action }}" >> $GITHUB_OUTPUT
-            echo "- **问题**: 未找到代理池状态文件" >> $GITHUB_OUTPUT
-            echo "- **时间**: $(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
-            echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: 检查钉钉通知配置
-        id: check_dingtalk
-        if: vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'dingtalk'
-        run: |
-          echo "has_webhook=true" >> $GITHUB_OUTPUT
-      
-      - name: 发送通知
-        if: steps.check_dingtalk.outputs.has_webhook == 'true'
-        uses: fifsky/dingtalk-action@master
-        with:
-          url: ${{ secrets.DINGTALK_WEBHOOK }}
-          type: markdown
-          content: ${{ steps.prepare_message.outputs.message }}
-          at: all 
+
+          echo "action=$FINAL_ACTION" >> $GITHUB_OUTPUT
