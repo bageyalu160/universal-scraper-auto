@@ -15,11 +15,13 @@ from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import LiteralScalarString, PlainScalarString
 import re
 
+from .validators import WorkflowValidator
+
 
 class JsonnetWorkflowGenerator:
     """基于Jsonnet的工作流生成器类，用于生成GitHub Actions工作流文件"""
     
-    def __init__(self, settings_path=None, sites_dir=None, output_dir=None, logger=None):
+    def __init__(self, settings_path=None, sites_dir=None, output_dir=None, logger=None, validate_output=False):
         """
         初始化工作流生成器
         
@@ -28,6 +30,7 @@ class JsonnetWorkflowGenerator:
             sites_dir (str, optional): 站点配置目录
             output_dir (str, optional): 输出目录
             logger (logging.Logger, optional): 日志记录器
+            validate_output (bool, optional): 是否验证生成的工作流文件
         """
         # 设置日志记录器
         self.logger = logger or logging.getLogger('jsonnet_workflow_generator')
@@ -47,19 +50,30 @@ class JsonnetWorkflowGenerator:
         
         # 创建输出目录（如果不存在）
         os.makedirs(self.output_dir, exist_ok=True)
+        
+        # 是否验证生成的工作流文件
+        self.validate_output = validate_output
+        
+        # 创建验证器
+        if self.validate_output:
+            self.validator = WorkflowValidator(logger=self.logger)
     
     def _load_settings(self):
         """加载设置文件"""
+        self.logger.debug(f"开始加载设置文件: {self.settings_path}")
         try:
             yaml = YAML(typ='safe')
             with open(self.settings_path, 'r', encoding='utf-8') as f:
-                return yaml.load(f)
+                settings = yaml.load(f)
+                self.logger.debug(f"成功加载设置文件，包含 {len(settings)} 个顶级配置项")
+                return settings
         except Exception as e:
             self.logger.error(f"加载设置文件失败: {e}")
             return {}
     
     def _load_site_config(self, site_id: str):
         """加载站点配置"""
+        self.logger.debug(f"开始加载站点 {site_id} 的配置")
         try:
             site_path = self.sites_dir / f"{site_id}.yaml"
             if not site_path.exists():
@@ -68,36 +82,87 @@ class JsonnetWorkflowGenerator:
                 
             yaml = YAML(typ='safe')
             with open(site_path, 'r', encoding='utf-8') as f:
-                return yaml.load(f)
+                config = yaml.load(f)
+                self.logger.debug(f"成功加载站点 {site_id} 配置，包含 {len(config)} 个顶级配置项")
+                if self.logger.level == logging.DEBUG:
+                    self.logger.debug(f"站点 {site_id} 配置包含以下模块: {', '.join(config.keys())}")
+                return config
         except Exception as e:
             self.logger.error(f"加载站点配置失败: {e}")
             return None
     
     def _extract_global_config(self):
         """从设置中提取全局配置"""
+        self.logger.debug("开始提取全局配置")
         try:
             global_config = {}
+            
+            # 提取运行时设置
+            runtime = self.settings.get('runtime', {})
+            global_config['runtime'] = {
+                'mode': runtime.get('mode', 'local'),
+                'runner': runtime.get('runner', 'ubuntu-latest'),
+                'python_version': runtime.get('python_version', '3.10'),
+                'timeout_minutes': runtime.get('timeout_minutes', 30),
+                'timezone': runtime.get('timezone', 'Asia/Shanghai'),
+                'debug': runtime.get('debug', False)
+            }
+            self.logger.debug(f"提取运行时设置: runner={global_config['runtime']['runner']}, python_version={global_config['runtime']['python_version']}")
+            
+            # 提取路径设置
+            paths = self.settings.get('paths', {})
+            global_config['paths'] = {
+                'data': paths.get('data', 'data'),
+                'data_daily': paths.get('data_daily', 'data/daily'),
+                'analysis': paths.get('analysis', 'analysis'),
+                'analysis_daily': paths.get('analysis_daily', 'analysis/daily'),
+                'status': paths.get('status', 'status'),
+                'logs': paths.get('logs', 'logs'),
+                'config': paths.get('config', 'config'),
+                'config_sites': paths.get('config_sites', 'config/sites')
+            }
+            self.logger.debug(f"提取路径设置: data_daily={global_config['paths']['data_daily']}, config_sites={global_config['paths']['config_sites']}")
             
             # 提取通知设置
             notification = self.settings.get('notification', {})
             global_config['notification'] = {
                 'enabled': notification.get('enabled', False),
                 'type': notification.get('type', 'none'),
-                'webhooks': notification.get('webhooks', {})
+                'webhooks': notification.get('webhooks', {}),
+                'template': notification.get('template', ''),
+                'channels': notification.get('channels', {})
             }
+            self.logger.debug(f"提取通知设置: enabled={global_config['notification']['enabled']}, type={global_config['notification']['type']}")
             
             # 提取代理设置
-            proxy = self.settings.get('proxy', {})
+            proxy_pool = self.settings.get('proxy_pool', {})
             global_config['proxy'] = {
-                'enabled': proxy.get('enabled', False),
-                'pool_size': proxy.get('pool_size', 20),
-                'update_interval': proxy.get('update_interval', '0 0 * * *')
+                'enabled': proxy_pool.get('enabled', False),
+                'pool_size': proxy_pool.get('pool_size', 20),
+                'update_interval': proxy_pool.get('update_interval', '0 0 * * *'),
+                'validation': proxy_pool.get('validation', {'timeout': 10, 'retry_count': 3})
             }
+            self.logger.debug(f"提取代理设置: enabled={global_config['proxy']['enabled']}, pool_size={global_config['proxy']['pool_size']}")
+            
+            # 提取分析设置
+            analysis = self.settings.get('analysis', {})
+            global_config['analysis'] = {
+                'enabled': analysis.get('enabled', True),
+                'provider': analysis.get('provider', 'gemini'),
+                'prompt_dir': analysis.get('prompt_dir', 'config/analysis/prompts'),
+                'batch_size': analysis.get('batch_size', 100),
+                'max_retry': analysis.get('max_retry', 3)
+            }
+            self.logger.debug(f"提取分析设置: provider={global_config['analysis']['provider']}, prompt_dir={global_config['analysis']['prompt_dir']}")
             
             # 提取其他全局设置
-            global_config['github'] = self.settings.get('github', {})
-            global_config['storage'] = self.settings.get('storage', {})
+            global_config['github_actions'] = self.settings.get('github_actions', {})
+            global_config['schedules'] = self.settings.get('schedules', {})
+            global_config['scripts'] = self.settings.get('scripts', {})
+            global_config['dependencies'] = self.settings.get('dependencies', {})
+            global_config['project'] = self.settings.get('project', {})
             
+            self.logger.debug(f"全局配置提取完成，包含 {len(global_config)} 个顶级配置项")
             return global_config
         except Exception as e:
             self.logger.error(f"提取全局配置失败: {e}")
@@ -279,7 +344,7 @@ class JsonnetWorkflowGenerator:
             # For other types (int, bool, float, NoneType), return as is.
             return data
 
-    def generate_workflow(self, template_name: str, output_name: str, ext_vars: Optional[Dict[str, Any]] = None) -> bool:
+    def generate_workflow(self, template_name: str, output_name: str, ext_vars: Optional[Dict[str, Any]] = None):
         """
         使用Jsonnet模板生成工作流文件
         
@@ -291,86 +356,96 @@ class JsonnetWorkflowGenerator:
         Returns:
             bool: 是否成功生成
         """
+        self.logger.debug(f"开始生成工作流: 模板={template_name}, 输出={output_name}")
         try:
-            # 首先检查是否存在.jsonnet格式的模板
+            # 准备模板路径和输出路径
             template_path = self.templates_dir / f"{template_name}.jsonnet"
             output_path = self.output_dir / f"{output_name}.yml"
             
+            self.logger.debug(f"模板路径: {template_path}")
+            self.logger.debug(f"输出路径: {output_path}")
+            
+            # 确保模板文件存在
             if not template_path.exists():
                 self.logger.error(f"模板文件不存在: {template_path}")
                 return False
             
             # 准备外部变量
             ext_vars = ext_vars or {}
+            self.logger.debug(f"外部变量: {', '.join(ext_vars.keys())}")
             ext_vars_json = {k: json.dumps(v) for k, v in ext_vars.items()}
             
             # 渲染Jsonnet模板
-            try:
-                # 使用_jsonnet库评估Jsonnet模板
-                json_str = _jsonnet.evaluate_file(
-                    str(template_path),
-                    ext_vars=ext_vars_json
-                )
-                
-                # 将JSON转换为Python对象
-                workflow_obj_raw = json.loads(json_str)
-                
-                # 处理工作流键的顺序和 'on' 键
-                workflow_obj_ordered = self._process_workflow_keys(workflow_obj_raw)
-
-                # 准备数据以供ruamel.yaml转储
-                workflow_obj_transformed = self._prepare_data_for_yaml_dump(workflow_obj_ordered)
-                
-                # 使用 ruamel.yaml 进行序列化
-                yaml = YAML()
-                yaml.indent(mapping=2, sequence=4, offset=2) 
-                yaml.preserve_quotes = True 
-                yaml.width = 120
-                # yaml.representer.ignore_aliases = lambda *data: True # Disable anchors/aliases if not desired
-                
-                # 写入文件
-                with open(output_path, 'w', encoding='utf-8') as f:
-                    yaml.dump(workflow_obj_transformed, f)
-                
-                self.logger.info(f"成功生成工作流文件: {output_path}")
-                return True
-                
-            except RuntimeError as e:
-                self.logger.error(f"Jsonnet模板渲染或评估失败: {e}")
-                return False
-            except Exception as e:
-                self.logger.error(f"生成工作流文件时发生意外错误 ({template_name} -> {output_name}): {e}", exc_info=True)
-                return False
-                
+            self.logger.debug(f"开始渲染 Jsonnet 模板: {template_name}")
+            json_str = _jsonnet.evaluate_file(
+                str(template_path),
+                ext_vars=ext_vars_json
+            )
+            self.logger.debug(f"Jsonnet 模板渲染完成，生成 JSON 数据长度: {len(json_str)} 字节")
+            
+            # 解析JSON
+            workflow_obj = json.loads(json_str)
+            self.logger.debug(f"JSON 解析完成，工作流对象包含 {len(workflow_obj)} 个顶级键")
+            
+            # 处理工作流对象，确保键的顺序正确
+            self.logger.debug("开始处理工作流对象键的顺序")
+            workflow_obj = self._process_workflow_keys(workflow_obj)
+            
+            # 处理作业顺序
+            if 'jobs' in workflow_obj:
+                self.logger.debug(f"开始处理作业顺序，共 {len(workflow_obj['jobs'])} 个作业")
+                workflow_obj['jobs'] = self._process_jobs_order(workflow_obj['jobs'])
+            
+            # 准备YAML输出
+            self.logger.debug("准备 YAML 输出")
+            yaml = YAML()
+            yaml.indent(mapping=2, sequence=4, offset=2)
+            yaml.preserve_quotes = True
+            
+            # 准备数据以便更好地输出为YAML
+            self.logger.debug("准备数据以便更好地输出为YAML")
+            workflow_data = self._prepare_data_for_yaml_dump(workflow_obj)
+            
+            # 写入YAML文件
+            self.logger.debug(f"开始写入 YAML 文件: {output_path}")
+            with open(output_path, 'w', encoding='utf-8') as f:
+                yaml.dump(workflow_data, f)
+            self.logger.debug(f"YAML 文件写入完成: {output_path}")
+            
+            # 验证生成的工作流文件（如果启用）
+            if self.validate_output:
+                self.logger.debug(f"验证步骤: 开始验证工作流文件 {output_path}")
+                try:
+                    self.logger.debug("验证步骤: 读取工作流文件内容")
+                    with open(output_path, 'r', encoding='utf-8') as f:
+                        workflow_content = f.read()
+                    
+                    self.logger.debug("验证步骤: 调用 WorkflowValidator.validate 方法")
+                    is_valid, errors = self.validator.validate(workflow_content)
+                    
+                    if not is_valid:
+                        self.logger.warning(f"验证步骤: 工作流文件验证失败 {output_path}")
+                        self.logger.debug(f"验证步骤: 发现 {len(errors)} 个验证错误")
+                        for i, error in enumerate(errors):
+                            self.logger.warning(f"验证错误 {i+1}/{len(errors)}: {error}")
+                        self.logger.debug("验证步骤: 尽管有验证错误，但仍然继续生成工作流文件")
+                        # 不返回False，因为文件已经生成，只是有警告
+                    else:
+                        self.logger.debug(f"验证步骤: 工作流文件验证通过 {output_path}")
+                except Exception as e:
+                    self.logger.warning(f"验证步骤: 验证过程中发生错误: {e}")
+                    import traceback
+                    self.logger.debug(f"验证步骤: 验证错误详情: {traceback.format_exc()}")
+                    # 验证错误不应该影响文件生成
+            
+            self.logger.info(f"成功生成工作流文件: {output_path}")
+            return True
+            
         except Exception as e:
             self.logger.error(f"生成工作流文件失败: {e}")
+            import traceback
+            self.logger.debug(f"错误详情: {traceback.format_exc()}")
             return False
-    
-    def generate_master_workflow(self) -> bool:
-        """
-        生成主调度工作流文件
-        
-        Returns:
-            bool: 是否成功生成
-        """
-        try:
-            # 获取所有站点ID
-            site_files = list(self.sites_dir.glob("*.yaml"))
-            site_ids = [site_file.stem for site_file in site_files if site_file.stem != "example"]
-            
-            # 准备外部变量
-            ext_vars = {
-                "sites": site_ids,
-                "global_config": self.global_config
-            }
-            
-            # 生成工作流文件
-            return self.generate_workflow("master_workflow", "master_workflow", ext_vars)
-            
-        except Exception as e:
-            self.logger.error(f"生成主调度工作流文件失败: {e}")
-            return False
-    
     def generate_crawler_workflow(self, site_id: str) -> bool:
         """
         生成爬虫工作流文件
@@ -381,13 +456,17 @@ class JsonnetWorkflowGenerator:
         Returns:
             bool: 是否成功生成
         """
+        self.logger.debug(f"开始为站点 {site_id} 生成爬虫工作流")
         try:
             # 加载站点配置
+            self.logger.debug(f"加载站点 {site_id} 配置")
             site_config = self._load_site_config(site_id)
             if not site_config:
+                self.logger.error(f"无法加载站点 {site_id} 配置，取消生成爬虫工作流")
                 return False
             
             # 准备外部变量
+            self.logger.debug(f"准备站点 {site_id} 爬虫工作流的外部变量")
             ext_vars = {
                 "site_id": site_id,
                 "site_config": site_config,
@@ -395,10 +474,13 @@ class JsonnetWorkflowGenerator:
             }
             
             # 生成工作流文件
+            self.logger.debug(f"开始生成站点 {site_id} 的爬虫工作流文件")
             return self.generate_workflow("crawler", f"crawler_{site_id}", ext_vars)
             
         except Exception as e:
-            self.logger.error(f"生成爬虫工作流文件失败: {site_id}, {e}")
+            self.logger.error(f"生成爬虫工作流文件失败: {e}")
+            import traceback
+            self.logger.debug(f"错误详情: {traceback.format_exc()}")
             return False
     
     def generate_analyzer_workflow(self, site_id: str) -> bool:
@@ -411,13 +493,17 @@ class JsonnetWorkflowGenerator:
         Returns:
             bool: 是否成功生成
         """
+        self.logger.debug(f"开始为站点 {site_id} 生成分析工作流")
         try:
             # 加载站点配置
+            self.logger.debug(f"加载站点 {site_id} 配置")
             site_config = self._load_site_config(site_id)
             if not site_config:
+                self.logger.error(f"无法加载站点 {site_id} 配置，取消生成分析工作流")
                 return False
             
             # 准备外部变量
+            self.logger.debug(f"准备站点 {site_id} 分析工作流的外部变量")
             ext_vars = {
                 "site_id": site_id,
                 "site_config": site_config,
@@ -425,16 +511,19 @@ class JsonnetWorkflowGenerator:
             }
             
             # 生成工作流文件
+            self.logger.debug(f"开始生成站点 {site_id} 的分析工作流文件")
             return self.generate_workflow("analyzer", f"analyzer_{site_id}", ext_vars)
             
         except Exception as e:
-            self.logger.error(f"生成分析工作流文件失败: {site_id}, {e}")
+            self.logger.error(f"生成分析工作流文件失败: {e}")
+            import traceback
+            self.logger.debug(f"错误详情: {traceback.format_exc()}")
             return False
     
     def generate_enhanced_analyzer_workflow(self, site_id: str) -> bool:
         """
         生成增强版分析工作流文件（完整功能对标YAML模板）
-        
+{{ ... }}
         Args:
             site_id: 站点ID
             
@@ -517,6 +606,26 @@ class JsonnetWorkflowGenerator:
             self.logger.error(f"生成代理池管理工作流文件失败: {e}")
             return False
     
+    def generate_master_workflow(self) -> bool:
+        """
+        生成主调度工作流文件
+        
+        Returns:
+            bool: 是否成功生成
+        """
+        try:
+            # 准备外部变量
+            ext_vars = {
+                "global_config": self.global_config
+            }
+            
+            # 生成工作流文件
+            return self.generate_workflow("master_workflow", "master_workflow", ext_vars)
+            
+        except Exception as e:
+            self.logger.error(f"生成主调度工作流文件失败: {e}")
+            return False
+    
     def generate_common_workflows(self) -> bool:
         """
         生成所有通用工作流文件
@@ -525,6 +634,7 @@ class JsonnetWorkflowGenerator:
             bool: 是否所有工作流都成功生成
         """
         success_count = 0
+        total_count = 4  # 主工作流、仪表盘工作流、代理池管理工作流和主调度工作流
         total_count = 3  # 主工作流、仪表盘工作流和代理池管理工作流
         
         # 生成主调度工作流

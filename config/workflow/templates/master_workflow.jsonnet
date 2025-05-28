@@ -1,47 +1,58 @@
-// 主调度工作流模板 - Jsonnet版本
+// 主调度工作流模板 - Jsonnet版本 (增强版)
 // 修复版本 - 已修复以下问题：
 // 1. ✅ 修复语法错误（schedule数组格式）
 // 2. ✅ 更新数据目录路径逻辑（使用data/daily/$DATE结构）
 // 3. ✅ 改进错误处理机制（宽松的错误处理，不中断流程）
 // 4. ✅ 添加条件执行逻辑（仅在数据文件存在时触发分析）
+// 5. ✅ 使用公共函数优化代码结构和可维护性
 
 local params = import 'params.libsonnet';
+local utils = import 'utils.libsonnet';
+
+// 外部参数
+local global_config = std.parseJson(std.extVar('global_config'));
+
+// 缓存配置
+local cache_config = utils.generateCacheConfig('master', 'workflow');
+
+// 超时设置
+local setup_timeout = utils.getJobTimeout('setup', global_config);
+local summary_timeout = utils.getJobTimeout('setup', global_config) / 2;
+
+// 错误处理策略
+local master_error_strategy = utils.getErrorHandlingStrategy('master_workflow', global_config);
+
+// 环境变量
+local workflow_env = utils.generateWorkflowEnv('master', global_config);
 
 {
   name: '主调度工作流',
   'run-name': '🚀 主调度工作流 #${{ github.run_number }} (${{ github.actor }})',
   
-  on: {
-    workflow_dispatch: {
-      inputs: {
-        action: {
-          description: '执行操作',
-          required: true,
-          type: 'choice',
-          options: [
-            'crawl_all',
-            'analyze_all',
-            'update_dashboard',
-            'update_proxy_pool',
-            'full_pipeline'
-          ]
-        },
-        site_id: {
-          description: '站点ID (仅适用于单站点操作)',
-          required: false,
-          type: 'string'
-        },
-        date: {
-          description: '数据日期 (留空则使用当前日期)',
-          required: false,
-          type: 'string'
-        }
-      }
+  on: utils.generateWorkflowDispatchTrigger({
+    action: {
+      description: '执行操作',
+      required: true,
+      type: 'choice',
+      options: [
+        'crawl_all',
+        'analyze_all',
+        'update_dashboard',
+        'update_proxy_pool',
+        'full_pipeline'
+      ]
     },
-    schedule: [
-      {cron: '0 0 * * *'}
-    ]
-  },
+    site_id: {
+      description: '站点ID (仅适用于单站点操作)',
+      required: false,
+      type: 'string'
+    },
+    date: {
+      description: '数据日期 (留空则使用当前日期)',
+      required: false,
+      type: 'string'
+    }
+  }) + utils.generateScheduleTrigger('0 0 * * *'),
   
   permissions: {
     contents: 'write',
@@ -50,20 +61,24 @@ local params = import 'params.libsonnet';
     'id-token': 'write'
   },
   
+  // 并发控制 - 避免主工作流并行运行
+  concurrency: utils.generateConcurrencyConfig('master', 'workflow'),
+  
+  // 全局环境变量
+  env: workflow_env,
+  
   jobs: {
     // 准备环境任务
     setup: {
       name: '准备环境',
-      'runs-on': 'ubuntu-latest',
+      'runs-on': params.runtime.runner,
+      'timeout-minutes': setup_timeout,
       outputs: {
         date: '${{ steps.set-date.outputs.date }}',
         sites: '${{ steps.list-sites.outputs.sites }}'
       },
       steps: [
-        {
-          name: '检出代码',
-          uses: 'actions/checkout@v4'
-        },
+        utils.generateCheckoutStep(),
         {
           name: '设置日期',
           id: 'set-date',
@@ -130,11 +145,11 @@ local params = import 'params.libsonnet';
     update_proxy_pool: {
       name: '更新代理池',
       needs: 'setup',
-      'if': 'github.event.inputs.action == \'update_proxy_pool\' || github.event.inputs.action == \'full_pipeline\' || github.event_name == \'schedule\'',
-      'runs-on': 'ubuntu-latest',
+      'if': "github.event.inputs.action == 'update_proxy_pool' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule'",
+      'runs-on': params.runtime.runner,
       steps: [
         {
-          name: '触发代理池工作流',
+          name: '触发代理池更新工作流',
           uses: 'benc-uk/workflow-dispatch@v1',
           with: {
             workflow: 'proxy_pool_manager.yml',
@@ -149,13 +164,13 @@ local params = import 'params.libsonnet';
     crawl: {
       name: '爬取数据',
       needs: ['setup', 'update_proxy_pool'],
-      'if': 'always() && (github.event.inputs.action == \'crawl_all\' || github.event.inputs.action == \'full_pipeline\' || github.event_name == \'schedule\') && (needs.update_proxy_pool.result == \'success\' || needs.update_proxy_pool.result == \'skipped\')',
-      'runs-on': 'ubuntu-latest',
+      'if': "always() && (github.event.inputs.action == 'crawl_all' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule') && (needs.update_proxy_pool.result == 'success' || needs.update_proxy_pool.result == 'skipped')",
+      'runs-on': params.runtime.runner,
       strategy: {
         matrix: {
           site_id: '${{ fromJSON(needs.setup.outputs.sites) }}'
         },
-        'fail-fast': false
+        'fail-fast': master_error_strategy['fail-fast']
       },
       steps: [
         {
@@ -174,19 +189,16 @@ local params = import 'params.libsonnet';
     analyze: {
       name: '分析数据',
       needs: ['setup', 'crawl'],
-      'if': 'always() && (github.event.inputs.action == \'analyze_all\' || github.event.inputs.action == \'full_pipeline\' || github.event_name == \'schedule\') && (needs.crawl.result == \'success\' || needs.crawl.result == \'skipped\')',
-      'runs-on': 'ubuntu-latest',
+      'if': "always() && (github.event.inputs.action == 'analyze_all' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule') && (needs.crawl.result == 'success' || needs.crawl.result == 'skipped')",
+      'runs-on': params.runtime.runner,
       strategy: {
         matrix: {
           site_id: '${{ fromJSON(needs.setup.outputs.sites) }}'
         },
-        'fail-fast': false
+        'fail-fast': master_error_strategy['fail-fast']
       },
       steps: [
-        {
-          name: '检出代码',
-          uses: 'actions/checkout@v4'
-        },
+        utils.generateCheckoutStep(),
         {
           name: '获取最新数据文件',
           id: 'get-latest-file',
@@ -197,21 +209,17 @@ local params = import 'params.libsonnet';
             
             echo "=== 数据文件查找 ==="
             echo "站点ID: $SITE_ID"
-            echo "目标日期: $DATE"
+            echo "数据日期: $DATE"
             echo "数据目录: $DATA_DIR"
             
             if [ -d "$DATA_DIR" ]; then
-              echo "✅ 数据目录存在"
-              echo "目录内容:"
-              ls -la "$DATA_DIR" | grep -E "(${SITE_ID}|\.json|\.csv)" || echo "无相关文件"
+              # 查找匹配的数据文件
+              DATA_FILE=$(find $DATA_DIR -name "${SITE_ID}*.json" -type f | sort | tail -1)
               
-              FILE=$(find $DATA_DIR -name "*${SITE_ID}*" -type f | sort | tail -n 1)
-              if [ -n "$FILE" ]; then
-                echo "data_file=$FILE" >> $GITHUB_OUTPUT
+              if [ -n "$DATA_FILE" ]; then
+                echo "data_file=$DATA_FILE" >> $GITHUB_OUTPUT
                 echo "found=true" >> $GITHUB_OUTPUT
-                echo "✅ 找到数据文件: $FILE"
-                echo "文件大小: $(du -h "$FILE" | cut -f1)"
-                echo "文件时间: $(ls -l "$FILE" | awk '{print $6, $7, $8}')"
+                echo "✅ 找到数据文件: $DATA_FILE"
               else
                 echo "data_file=" >> $GITHUB_OUTPUT
                 echo "found=false" >> $GITHUB_OUTPUT
@@ -234,7 +242,7 @@ local params = import 'params.libsonnet';
         },
         {
           name: '触发分析工作流',
-          'if': 'steps.get-latest-file.outputs.data_file != \'\'',
+          'if': "steps.get-latest-file.outputs.data_file != ''",
           uses: 'benc-uk/workflow-dispatch@v1',
           with: {
             workflow: 'analyzer_${{ matrix.site_id }}.yml',
@@ -255,29 +263,41 @@ local params = import 'params.libsonnet';
     update_dashboard: {
       name: '更新仪表盘',
       needs: ['setup', 'analyze'],
-      'if': 'always() && (github.event.inputs.action == \'update_dashboard\' || github.event.inputs.action == \'full_pipeline\' || github.event_name == \'schedule\') && (needs.analyze.result == \'success\' || needs.analyze.result == \'skipped\')',
-      uses: './.github/workflows/update_dashboard.yml'
+      'if': "always() && (github.event.inputs.action == 'update_dashboard' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule') && (needs.analyze.result == 'success' || needs.analyze.result == 'skipped')",
+      'runs-on': params.runtime.runner,
+      steps: [
+        {
+          name: '触发仪表盘更新工作流',
+          uses: 'benc-uk/workflow-dispatch@v1',
+          with: {
+            workflow: 'dashboard.yml',
+            token: '${{ secrets.GITHUB_TOKEN }}',
+            inputs: '{"date": "${{ needs.setup.outputs.date }}"}'
+          }
+        }
+      ]
     },
-
-    // 工作流执行摘要
+    
+    // 工作流总结任务
     workflow_summary: {
-      name: '执行摘要',
+      name: '工作流总结',
       needs: ['setup', 'update_proxy_pool', 'crawl', 'analyze', 'update_dashboard'],
       'if': 'always()',
-      'runs-on': 'ubuntu-latest',
+      'runs-on': params.runtime.runner,
+      'timeout-minutes': summary_timeout,
       steps: [
+        utils.generateCheckoutStep(),
+        utils.generateDirectorySetupStep(['status/workflow']),
         {
           name: '生成执行摘要',
           run: |||
-            echo "=== 🚀 主调度工作流执行摘要 ==="
-            echo "执行时间: $(date)"
-            echo "运行ID: ${{ github.run_id }}"
+            echo "=== 🚀 主工作流执行摘要 ==="
+            echo "执行日期: ${{ needs.setup.outputs.date }}"
             echo "触发方式: ${{ github.event_name }}"
-            echo "执行操作: ${{ github.event.inputs.action || '定时任务' }}"
-            echo "目标站点: ${{ github.event.inputs.site_id || '全部站点' }}"
-            echo "数据日期: ${{ needs.setup.outputs.date }}"
+            echo "操作类型: ${{ github.event.inputs.action || '定时任务' }}"
+            echo "处理站点: ${{ needs.setup.outputs.sites }}"
             echo ""
-            echo "=== 📊 各阶段执行结果 ==="
+            echo "=== 📊 各步骤执行结果 ==="
             echo "1️⃣ 环境准备: ${{ needs.setup.result }}"
             echo "2️⃣ 代理池更新: ${{ needs.update_proxy_pool.result }}"
             echo "3️⃣ 数据爬取: ${{ needs.crawl.result }}"
@@ -313,7 +333,11 @@ local params = import 'params.libsonnet';
             EOF
             echo "✅ 执行摘要已保存到 status/workflow/master_workflow_summary.json"
           |||
-        }
+        },
+        utils.generateGitCommitStep(
+          ["status/workflow/"],
+          "📊 自动更新: 主工作流执行摘要 (${{ needs.setup.outputs.date }})"
+        )
       ]
     },
     
@@ -322,19 +346,10 @@ local params = import 'params.libsonnet';
       name: '通知完成',
       needs: ['setup', 'update_proxy_pool', 'crawl', 'analyze', 'update_dashboard', 'workflow_summary'],
       'if': 'always()',
-      'runs-on': 'ubuntu-latest',
+      'runs-on': params.runtime.runner,
       steps: [
-        {
-          name: '检出代码',
-          uses: 'actions/checkout@v4'
-        },
-        {
-          name: '设置Python环境',
-          uses: 'actions/setup-python@v4',
-          with: {
-            'python-version': '3.9'
-          }
-        },
+        utils.generateCheckoutStep(),
+        utils.generatePythonSetupStep(params.runtime.python_version, true),
         {
           name: '安装依赖',
           run: |||

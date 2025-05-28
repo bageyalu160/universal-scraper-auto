@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-工作流生成器 - 命令行入口点
+基础工作流生成器 (Jinja2) - 命令行入口点
+
+这是一个简单的工作流生成器，仅支持基于Jinja2模板引擎的.yml.template格式模板。
+不支持Jsonnet或其他高级模板格式。如需使用Jsonnet模板，请使用:
+- generate_workflows_jsonnet.py: 专用于Jsonnet模板
+- generate_workflows.py: 支持多种模板引擎，可通过--engine参数选择
+
 使用workflow_generator包中的WorkflowGenerator类来处理工作流生成逻辑
 """
 

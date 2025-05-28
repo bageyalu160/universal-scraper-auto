@@ -28,6 +28,17 @@ permissions:
   contents: write
   id-token: write
   pages: write
+env:
+  CONFIG_DIR: config
+  DATA_DIR: data/daily
+  LOGS_DIR: logs
+  PYTHONUNBUFFERED: 1
+  SITES_DIR: config/sites
+  STATUS_DIR: status
+  WORKFLOW_TYPE: master
+concurrency:
+  cancel-in-progress: true
+  group: master-workflow-${{ github.ref }}
 jobs:
   setup:
     name: 准备环境
@@ -35,6 +46,7 @@ jobs:
     outputs:
       date: ${{ steps.set-date.outputs.date }}
       sites: ${{ steps.list-sites.outputs.sites }}
+    timeout-minutes: 10
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -90,12 +102,12 @@ jobs:
           fi
   update_proxy_pool:
     name: 更新代理池
-    if: github.event.inputs.action == 'update_proxy_pool' || github.event.inputs.action == 'full_pipeline' || github.event_name
-      == 'schedule'
+    if: github.event.inputs.action == 'update_proxy_pool' || github.event.inputs.action
+      == 'full_pipeline' || github.event_name == 'schedule'
     needs: setup
     runs-on: ubuntu-latest
     steps:
-      - name: 触发代理池工作流
+      - name: 触发代理池更新工作流
         uses: benc-uk/workflow-dispatch@v1
         with:
           inputs: '{"action": "update"}'
@@ -103,14 +115,15 @@ jobs:
           workflow: proxy_pool_manager.yml
   crawl:
     name: 爬取数据
-    if: always() && (github.event.inputs.action == 'crawl_all' || github.event.inputs.action == 'full_pipeline' || github.event_name
-      == 'schedule') && (needs.update_proxy_pool.result == 'success' || needs.update_proxy_pool.result == 'skipped')
+    if: always() && (github.event.inputs.action == 'crawl_all' || github.event.inputs.action
+      == 'full_pipeline' || github.event_name == 'schedule') && (needs.update_proxy_pool.result
+      == 'success' || needs.update_proxy_pool.result == 'skipped')
     needs:
       - setup
       - update_proxy_pool
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         site_id: ${{ fromJSON(needs.setup.outputs.sites) }}
     steps:
@@ -122,14 +135,15 @@ jobs:
           workflow: crawler_${{ matrix.site_id }}.yml
   analyze:
     name: 分析数据
-    if: always() && (github.event.inputs.action == 'analyze_all' || github.event.inputs.action == 'full_pipeline' || github.event_name
-      == 'schedule') && (needs.crawl.result == 'success' || needs.crawl.result == 'skipped')
+    if: always() && (github.event.inputs.action == 'analyze_all' || github.event.inputs.action
+      == 'full_pipeline' || github.event_name == 'schedule') && (needs.crawl.result
+      == 'success' || needs.crawl.result == 'skipped')
     needs:
       - setup
       - crawl
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         site_id: ${{ fromJSON(needs.setup.outputs.sites) }}
     steps:
@@ -144,21 +158,17 @@ jobs:
 
           echo "=== 数据文件查找 ==="
           echo "站点ID: $SITE_ID"
-          echo "目标日期: $DATE"
+          echo "数据日期: $DATE"
           echo "数据目录: $DATA_DIR"
 
           if [ -d "$DATA_DIR" ]; then
-            echo "✅ 数据目录存在"
-            echo "目录内容:"
-            ls -la "$DATA_DIR" | grep -E "(${SITE_ID}|\.json|\.csv)" || echo "无相关文件"
+            # 查找匹配的数据文件
+            DATA_FILE=$(find $DATA_DIR -name "${SITE_ID}*.json" -type f | sort | tail -1)
             
-            FILE=$(find $DATA_DIR -name "*${SITE_ID}*" -type f | sort | tail -n 1)
-            if [ -n "$FILE" ]; then
-              echo "data_file=$FILE" >> $GITHUB_OUTPUT
+            if [ -n "$DATA_FILE" ]; then
+              echo "data_file=$DATA_FILE" >> $GITHUB_OUTPUT
               echo "found=true" >> $GITHUB_OUTPUT
-              echo "✅ 找到数据文件: $FILE"
-              echo "文件大小: $(du -h "$FILE" | cut -f1)"
-              echo "文件时间: $(ls -l "$FILE" | awk '{print $6, $7, $8}')"
+              echo "✅ 找到数据文件: $DATA_FILE"
             else
               echo "data_file=" >> $GITHUB_OUTPUT
               echo "found=false" >> $GITHUB_OUTPUT
@@ -181,20 +191,29 @@ jobs:
         name: 触发分析工作流
         uses: benc-uk/workflow-dispatch@v1
         with:
-          inputs: "{\n  \"data_date\": \"${{ needs.setup.outputs.date }}\",\n  \"data_file\": \"${{ steps.get-latest-file.outputs.data_file
-            }}\",\n  \"site_id\": \"${{ matrix.site_id }}\"\n}\n"
+          inputs: "{\n  \"data_date\": \"${{ needs.setup.outputs.date }}\",\n  \"\
+            data_file\": \"${{ steps.get-latest-file.outputs.data_file }}\",\n  \"\
+            site_id\": \"${{ matrix.site_id }}\"\n}\n"
           token: ${{ secrets.GITHUB_TOKEN }}
           workflow: analyzer_${{ matrix.site_id }}.yml
   update_dashboard:
     name: 更新仪表盘
-    if: always() && (github.event.inputs.action == 'update_dashboard' || github.event.inputs.action == 'full_pipeline' ||
-      github.event_name == 'schedule') && (needs.analyze.result == 'success' || needs.analyze.result == 'skipped')
+    if: always() && (github.event.inputs.action == 'update_dashboard' || github.event.inputs.action
+      == 'full_pipeline' || github.event_name == 'schedule') && (needs.analyze.result
+      == 'success' || needs.analyze.result == 'skipped')
     needs:
       - setup
       - analyze
-    uses: ./.github/workflows/update_dashboard.yml
+    runs-on: ubuntu-latest
+    steps:
+      - name: 触发仪表盘更新工作流
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          inputs: '{"date": "${{ needs.setup.outputs.date }}"}'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: dashboard.yml
   workflow_summary:
-    name: 执行摘要
+    name: 工作流总结
     if: always()
     needs:
       - setup
@@ -203,18 +222,21 @@ jobs:
       - analyze
       - update_dashboard
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 创建必要目录
+        run: mkdir -p status/workflow
       - name: 生成执行摘要
         run: |
-          echo "=== 🚀 主调度工作流执行摘要 ==="
-          echo "执行时间: $(date)"
-          echo "运行ID: ${{ github.run_id }}"
+          echo "=== 🚀 主工作流执行摘要 ==="
+          echo "执行日期: ${{ needs.setup.outputs.date }}"
           echo "触发方式: ${{ github.event_name }}"
-          echo "执行操作: ${{ github.event.inputs.action || '定时任务' }}"
-          echo "目标站点: ${{ github.event.inputs.site_id || '全部站点' }}"
-          echo "数据日期: ${{ needs.setup.outputs.date }}"
+          echo "操作类型: ${{ github.event.inputs.action || '定时任务' }}"
+          echo "处理站点: ${{ needs.setup.outputs.sites }}"
           echo ""
-          echo "=== 📊 各阶段执行结果 ==="
+          echo "=== 📊 各步骤执行结果 ==="
           echo "1️⃣ 环境准备: ${{ needs.setup.result }}"
           echo "2️⃣ 代理池更新: ${{ needs.update_proxy_pool.result }}"
           echo "3️⃣ 数据爬取: ${{ needs.crawl.result }}"
@@ -249,6 +271,23 @@ jobs:
           }
           EOF
           echo "✅ 执行摘要已保存到 status/workflow/master_workflow_summary.json"
+      - name: 提交更改
+        run: |
+          # 配置Git
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 添加文件
+          git add status/workflow/
+
+          # 提交更改
+          if git diff --staged --quiet; then
+            echo "没有变更需要提交"
+          else
+            git commit -m "📊 自动更新: 主工作流执行摘要 (${{ needs.setup.outputs.date }})"
+            git push
+            echo "✅ 成功提交更改"
+          fi
   notify_completion:
     name: 通知完成
     if: always()
@@ -261,66 +300,42 @@ jobs:
       - workflow_summary
     runs-on: ubuntu-latest
     steps:
-      - id: prepare_message
-        name: 准备通知内容
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 设置Python
+        uses: actions/setup-python@v5
+        with:
+          cache: pip
+          python-version: '3.10'
+      - name: 安装依赖
         run: |
-          FAILED_JOBS=""
-          if [[ "${{ needs.update_proxy_pool.result }}" != "success" && "${{ needs.update_proxy_pool.result }}" != "skipped" ]]; then
-            FAILED_JOBS="$FAILED_JOBS 代理池更新,"
-          fi
-          if [[ "${{ needs.crawl.result }}" != "success" && "${{ needs.crawl.result }}" != "skipped" ]]; then
-            FAILED_JOBS="$FAILED_JOBS 爬虫阶段,"
-          fi
-          if [[ "${{ needs.analyze.result }}" != "success" && "${{ needs.analyze.result }}" != "skipped" ]]; then
-            FAILED_JOBS="$FAILED_JOBS 分析阶段,"
-          fi
-          if [[ "${{ needs.update_dashboard.result }}" != "success" && "${{ needs.update_dashboard.result }}" != "skipped" ]]; then
-            FAILED_JOBS="$FAILED_JOBS 仪表盘更新,"
-          fi
+          pip install -r requirements.txt
+      - env:
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK }}
+          WECHAT_WORK_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK }}
+        id: send_notification
+        name: 准备通知内容并发送
+        run: |
+          # 创建工作流状态文件
+          mkdir -p temp-notification
+          cat > temp-notification/master_workflow_status.json << EOF
+          {
+            "workflow_status": {
+              "setup": "${{ needs.setup.result }}",
+              "proxy_pool": "${{ needs.update_proxy_pool.result }}",
+              "crawl": "${{ needs.crawl.result }}",
+              "analyze": "${{ needs.analyze.result }}",
+              "dashboard": "${{ needs.update_dashboard.result }}",
+              "date": "${{ needs.setup.outputs.date }}",
+              "sites": ${{ needs.setup.outputs.sites }},
+              "action": "${{ github.event.inputs.action || '定时任务' }}",
+              "run_id": "${{ github.run_id }}",
+              "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+          }
+          EOF
 
-          if [[ -z "$FAILED_JOBS" ]]; then
-            echo "status=success" >> $GITHUB_OUTPUT
-            echo "message<<EOF" >> $GITHUB_OUTPUT
-            echo "### ✅ 数据流程全部完成" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "- **日期**: ${{ needs.setup.outputs.date }}" >> $GITHUB_OUTPUT
-            echo "- **站点**: ${{ github.event.inputs.site_id || '全部站点' }}" >> $GITHUB_OUTPUT
-            echo "- **操作**: ${{ github.event.inputs.action || '定时任务' }}" >> $GITHUB_OUTPUT
-            echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            FAILED_JOBS=${FAILED_JOBS%,}  # 移除最后的逗号
-            echo "status=failure" >> $GITHUB_OUTPUT
-            echo "message<<EOF" >> $GITHUB_OUTPUT
-            echo "### ❌ 数据流程部分失败" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "- **日期**: ${{ needs.setup.outputs.date }}" >> $GITHUB_OUTPUT
-            echo "- **站点**: ${{ github.event.inputs.site_id || '全部站点' }}" >> $GITHUB_OUTPUT
-            echo "- **失败阶段**: $FAILED_JOBS" >> $GITHUB_OUTPUT
-            echo "- **运行ID**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          fi
-      - id: check_dingtalk
-        if: vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'dingtalk'
-        name: 检查钉钉通知配置
-        run: |
-          echo "has_webhook=true" >> $GITHUB_OUTPUT
-      - if: steps.check_dingtalk.outputs.has_webhook == 'true'
-        name: 发送钉钉通知
-        uses: fifsky/dingtalk-action@master
-        with:
-          content: "${{ steps.prepare_message.outputs.message }}\n"
-          type: markdown
-          url: ${{ secrets.DINGTALK_WEBHOOK }}
-      - id: check_wechat
-        if: vars.ENABLE_NOTIFICATION == 'true' && vars.NOTIFICATION_TYPE == 'wechat'
-        name: 检查企业微信配置
-        run: |
-          echo "has_webhook=true" >> $GITHUB_OUTPUT
-      - if: steps.check_wechat.outputs.has_webhook == 'true'
-        name: 发送企业微信通知
-        uses: chf007/action-wechat-work@master
-        with:
-          content: ${{ steps.prepare_message.outputs.message }}
-          key: ${{ secrets.WECHAT_WEBHOOK }}
-          msgtype: markdown
+          # 发送通知
+          echo "📢 发送主工作流完成通知..."
+          python scripts/notify.py --file "temp-notification/master_workflow_status.json" --site "主工作流"

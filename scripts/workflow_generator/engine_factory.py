@@ -61,7 +61,12 @@ class WorkflowEngineFactory:
     def _get_default_engine(self):
         """从设置中获取默认引擎"""
         try:
-            return self.settings.get('github_actions', {}).get('workflow_engine', {}).get('default_engine', 'jinja2')
+            engine = self.settings.get('github_actions', {}).get('workflow_engine', {}).get('default_engine', 'jinja2')
+            # 确保返回的是字符串类型
+            if not isinstance(engine, str):
+                self.logger.warning(f"默认引擎设置不是字符串: {engine}，使用jinja2作为默认引擎")
+                return 'jinja2'
+            return engine
         except Exception as e:
             self.logger.warning(f"获取默认引擎设置失败: {e}，使用jinja2作为默认引擎")
             return 'jinja2'
@@ -74,7 +79,7 @@ class WorkflowEngineFactory:
             self.logger.warning(f"获取引擎覆盖设置失败: {e}，默认允许覆盖")
             return True
     
-    def get_generator(self, engine_type: Optional[str] = None):
+    def get_generator(self, engine_type: Optional[str] = None, validate_output: bool = False):
         """
         获取指定类型的工作流生成器
         
@@ -87,35 +92,67 @@ class WorkflowEngineFactory:
         Raises:
             ValueError: 如果指定的引擎类型不支持
         """
-        # 如果未指定引擎类型或不允许覆盖默认引擎，则使用默认引擎
-        if engine_type is None or (engine_type != self.default_engine and not self.allow_override):
-            engine_type = self.default_engine
-            if not self.allow_override:
-                self.logger.info(f"配置不允许覆盖默认引擎，使用默认引擎: {engine_type}")
+        self.logger.debug(f"开始获取工作流生成器，请求的引擎类型: {engine_type}")
+        self.logger.debug(f"当前默认引擎: {self.default_engine}, 允许覆盖: {self.allow_override}")
         
-        if engine_type.lower() == 'jinja2':
+        # 确保 engine_type 不是 None
+        if engine_type is None:
+            engine_type = self.default_engine
+            self.logger.info(f"未指定引擎类型，使用默认引擎: {engine_type}")
+            self.logger.debug(f"模型选择决策: 使用默认引擎 {engine_type} 构建模型")
+        # 如果不允许覆盖默认引擎，则使用默认引擎
+        elif engine_type != self.default_engine and not self.allow_override:
+            self.logger.debug(f"策略决策: 请求的引擎 {engine_type} 与默认不同，但配置不允许覆盖")
+            engine_type = self.default_engine
+            self.logger.info(f"配置不允许覆盖默认引擎，使用默认引擎: {engine_type}")
+        else:
+            self.logger.debug(f"策略决策: 使用请求的引擎 {engine_type}")
+        
+        # 确保 engine_type 是字符串类型
+        if not isinstance(engine_type, str):
+            self.logger.warning(f"引擎类型不是字符串: {engine_type}，使用默认引擎: {self.default_engine}")
+            engine_type = self.default_engine
+        
+        # 转换为小写以便于比较
+        engine_type_lower = engine_type.lower()
+        self.logger.debug(f"规范化引擎类型: {engine_type_lower}")
+        
+        # 根据引擎类型创建生成器
+        if engine_type_lower == 'jinja2':
+            self.logger.debug("模型定义: 使用 Jinja2 模板引擎定义工作流模型")
             if self._jinja_generator is None:
                 self.logger.info("创建 Jinja2 工作流生成器")
+                self.logger.debug("模型初始化: 构建 Jinja2 模板引擎实例")
                 self._jinja_generator = WorkflowGenerator(
                     settings_path=self.settings_path,
                     sites_dir=self.sites_dir,
                     output_dir=self.output_dir,
                     logger=self.logger
                 )
+                self.logger.debug("模型初始化完成: Jinja2 工作流生成器已创建")
+            else:
+                self.logger.debug("使用现有的 Jinja2 工作流生成器实例")
             return self._jinja_generator
             
-        elif engine_type.lower() == 'jsonnet':
+        elif engine_type_lower == 'jsonnet':
+            self.logger.debug("模型定义: 使用 Jsonnet 模板引擎定义工作流模型")
             if self._jsonnet_generator is None:
                 self.logger.info("创建 Jsonnet 工作流生成器")
+                self.logger.debug("模型初始化: 构建 Jsonnet 模板引擎实例")
                 self._jsonnet_generator = JsonnetWorkflowGenerator(
                     settings_path=self.settings_path,
                     sites_dir=self.sites_dir,
                     output_dir=self.output_dir,
-                    logger=self.logger
+                    logger=self.logger,
+                    validate_output=validate_output
                 )
+                self.logger.debug("模型初始化完成: Jsonnet 工作流生成器已创建")
+            else:
+                self.logger.debug("使用现有的 Jsonnet 工作流生成器实例")
             return self._jsonnet_generator
             
         else:
+            self.logger.error(f"不支持的引擎类型: {engine_type}")
             raise ValueError(f"不支持的引擎类型: {engine_type}")
     
     def generate_workflow(self, engine_type: Optional[str] = None, workflow_type: str = 'all', site_id: Optional[str] = None) -> bool:
@@ -130,12 +167,18 @@ class WorkflowEngineFactory:
         Returns:
             bool: 是否成功生成
         """
+        self.logger.debug(f"开始生成工作流: 引擎={engine_type}, 类型={workflow_type}, 站点={site_id or '所有'}")
         try:
             # 获取生成器
+            self.logger.debug("策略决策: 获取适合的工作流生成器")
             generator = self.get_generator(engine_type)
+            self.logger.debug(f"生成器获取成功: {generator.__class__.__name__}")
             
             # 根据工作流类型调用相应的方法
+            self.logger.debug(f"策略决策: 根据工作流类型 '{workflow_type}' 选择生成策略")
+            
             if workflow_type == 'master':
+                self.logger.debug("渲染决策: 生成主调度工作流")
                 return generator.generate_master_workflow()
                 
             elif workflow_type == 'crawler':
@@ -143,9 +186,12 @@ class WorkflowEngineFactory:
                     self.logger.error("生成爬虫工作流需要指定站点ID")
                     return False
                 
+                self.logger.debug(f"渲染决策: 为站点 {site_id} 生成爬虫工作流")
                 if engine_type.lower() == 'jinja2':
+                    self.logger.debug(f"渲染器选择: 使用 Jinja2 渲染器生成爬虫工作流")
                     return generator.generate_workflow(site_id, 'crawler')
                 else:
+                    self.logger.debug(f"渲染器选择: 使用 Jsonnet 渲染器生成爬虫工作流")
                     return generator.generate_crawler_workflow(site_id)
                     
             elif workflow_type == 'analyzer':
@@ -153,34 +199,58 @@ class WorkflowEngineFactory:
                     self.logger.error("生成分析工作流需要指定站点ID")
                     return False
                 
+                self.logger.debug(f"渲染决策: 为站点 {site_id} 生成分析工作流")
                 if engine_type.lower() == 'jinja2':
+                    self.logger.debug(f"渲染器选择: 使用 Jinja2 渲染器生成分析工作流")
                     return generator.generate_workflow(site_id, 'analyzer')
                 else:
+                    self.logger.debug(f"渲染器选择: 使用 Jsonnet 渲染器生成分析工作流")
                     return generator.generate_analyzer_workflow(site_id)
                     
             elif workflow_type == 'dashboard':
+                self.logger.debug("渲染决策: 生成仪表盘更新工作流")
                 return generator.generate_dashboard_workflow()
                 
             elif workflow_type == 'proxy_pool':
+                self.logger.debug("渲染决策: 生成代理池管理工作流")
                 return generator.generate_proxy_manager_workflow()
                 
             elif workflow_type == 'all':
                 if site_id:
                     # 为指定站点生成工作流
+                    self.logger.debug(f"渲染决策: 为站点 {site_id} 生成所有工作流")
                     if engine_type.lower() == 'jinja2':
+                        self.logger.debug(f"渲染器选择: 使用 Jinja2 渲染器生成站点工作流")
+                        self.logger.debug(f"开始生成站点 {site_id} 的爬虫工作流")
                         crawler_success = generator.generate_workflow(site_id, 'crawler')
+                        self.logger.debug(f"开始生成站点 {site_id} 的分析工作流")
                         analyzer_success = generator.generate_workflow(site_id, 'analyzer')
                     else:
+                        self.logger.debug(f"渲染器选择: 使用 Jsonnet 渲染器生成站点工作流")
+                        self.logger.debug(f"开始生成站点 {site_id} 的爬虫工作流")
                         crawler_success = generator.generate_crawler_workflow(site_id)
+                        self.logger.debug(f"开始生成站点 {site_id} 的分析工作流")
                         analyzer_success = generator.generate_analyzer_workflow(site_id)
                     
+                    self.logger.debug(f"站点 {site_id} 工作流生成结果: 爬虫={crawler_success}, 分析={analyzer_success}")
                     return crawler_success and analyzer_success
                 else:
                     # 生成所有工作流
+                    self.logger.debug("渲染决策: 生成所有工作流")
                     if engine_type.lower() == 'jinja2':
-                        return generator.generate_common_workflows() and generator.generate_all_workflows()
+                        self.logger.debug("渲染器选择: 使用 Jinja2 渲染器生成所有工作流")
+                        self.logger.debug("开始生成通用工作流")
+                        common_success = generator.generate_common_workflows()
+                        self.logger.debug("开始生成站点工作流")
+                        site_success = generator.generate_all_workflows()
+                        self.logger.debug(f"工作流生成结果: 通用={common_success}, 站点={site_success}")
+                        return common_success and site_success
                     else:
-                        return generator.generate_all_workflows()
+                        self.logger.debug("渲染器选择: 使用 Jsonnet 渲染器生成所有工作流")
+                        self.logger.debug("开始生成所有工作流")
+                        success = generator.generate_all_workflows()
+                        self.logger.debug(f"工作流生成结果: {success}")
+                        return success
             
             else:
                 self.logger.error(f"不支持的工作流类型: {workflow_type}")
@@ -188,4 +258,6 @@ class WorkflowEngineFactory:
                 
         except Exception as e:
             self.logger.error(f"生成工作流失败: {e}")
+            import traceback
+            self.logger.debug(f"错误详情: {traceback.format_exc()}")
             return False

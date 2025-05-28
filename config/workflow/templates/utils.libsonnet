@@ -10,12 +10,25 @@
     else
       site_id,
   
+  // 获取配置部分，如果不存在则返回默认值
+  getConfigSection(config, section_name, default_value={})::  
+    if std.objectHas(config, section_name) then
+      config[section_name]
+    else
+      default_value,
+
+  // 获取配置值，支持嵌套路径（如 "scraping.engine"）
+  getConfigValue(config, path, default_value)::  
+    local parts = std.split(path, '.');
+    local navigate(obj, idx) =
+      if idx >= std.length(parts) then obj
+      else if std.objectHas(obj, parts[idx]) then navigate(obj[parts[idx]], idx + 1)
+      else default_value;
+    navigate(config, 0),
+
   // 获取分析配置
   getAnalysisConfig(site_config)::
-    if std.objectHas(site_config, 'analysis') then
-      site_config.analysis
-    else
-      {},
+    $.getConfigSection(site_config, 'analysis', {}),
   
   // 获取输出扩展名
   getOutputExtension(analysis_config)::
@@ -27,6 +40,27 @@
     else
       'tsv',
   
+  // 根据引擎类型获取爬虫依赖项
+  getCrawlerDependencies(engine_type, dependencies_config)::  
+    if engine_type == 'firecrawl' then
+      dependencies_config.crawler.firecrawl
+    else if engine_type == 'playwright' then
+      dependencies_config.crawler.playwright
+    else if engine_type == 'selenium' then
+      dependencies_config.crawler.selenium
+    else
+      dependencies_config.crawler.requests,
+
+  // 根据AI提供商获取分析器依赖项
+  getAnalyzerDependencies(ai_provider, dependencies_config)::  
+    dependencies_config.analyzer + 
+    if ai_provider == 'openai' then
+      ['openai>=1.0.0']
+    else if ai_provider == 'gemini' then
+      ['google-generativeai>=0.3.1']
+    else
+      [],
+
   // 获取环境变量配置
   getEnvironmentVariables(analysis_config, global_config):: [
     { name: 'OPENAI_API_KEY', secret: 'OPENAI_API_KEY' },
@@ -34,6 +68,159 @@
     { name: 'ANTHROPIC_API_KEY', secret: 'ANTHROPIC_API_KEY' }
   ],
   
+  // 获取作业超时设置
+  getJobTimeout(job_type, global_config)::  
+    local base_timeout = if std.objectHas(global_config, 'runtime') && std.objectHas(global_config.runtime, 'timeout_minutes') 
+                       then global_config.runtime.timeout_minutes 
+                       else 30;
+    
+    // 根据作业类型返回适当的超时时间
+    if job_type == 'setup' then std.ceil(base_timeout / 3)
+    else if job_type == 'crawl' then std.ceil(base_timeout * 2)
+    else if job_type == 'analyze' then base_timeout
+    else if job_type == 'proxy_pool' then std.ceil(base_timeout / 1.5)
+    else if job_type == 'dashboard' then std.ceil(base_timeout / 2)
+    else base_timeout,
+  
+  // 获取错误处理策略
+  getErrorHandlingStrategy(step_type, global_config)::  
+    // 默认策略
+    local default_strategy = {
+      'continue-on-error': false,
+      'fail-fast': true
+    };
+    
+    // 可以容忍错误的步骤类型
+    local tolerant_steps = [
+      'crawl', 'analyze', 'notification', 'proxy_validation', 'data_processing'
+    ];
+    
+    // 如果是可容错步骤，则允许继续执行
+    if std.member(tolerant_steps, step_type) then
+      default_strategy + { 'continue-on-error': true, 'fail-fast': false }
+    else
+      default_strategy,
+  
+  // 生成缓存配置
+  generateCacheConfig(workflow_type, id, engine='')::  
+    local prefix = workflow_type + '-deps-' + id;
+    local key_prefix = if engine != '' then prefix + '-' + engine else prefix;
+    local paths = ['~/.cache/pip'];
+    
+    if workflow_type == 'crawler' then
+      {
+        enabled: true,
+        key_prefix: key_prefix,
+        paths: paths + ['data/' + id + '/cache']
+      }
+    else if workflow_type == 'analyzer' then
+      {
+        enabled: true,
+        key_prefix: key_prefix,
+        paths: paths + ['analysis/' + id + '/cache']
+      }
+    else if workflow_type == 'proxy_pool' then
+      {
+        enabled: true,
+        key_prefix: key_prefix,
+        paths: paths + ['proxy_pool/cache']
+      }
+    else if workflow_type == 'dashboard' then
+      {
+        enabled: true,
+        key_prefix: key_prefix,
+        paths: paths + ['dashboard/cache']
+      }
+    else
+      {
+        enabled: true,
+        key_prefix: key_prefix,
+        paths: paths
+      },
+
+  // 生成工作流环境变量
+  generateWorkflowEnv(workflow_type, global_config)::  
+    // 基础环境变量
+    local paths = if std.objectHas(global_config, 'paths') then global_config.paths else {
+      config: 'config',
+      config_sites: 'config/sites',
+      data_daily: 'data/daily',
+      status: 'status',
+      logs: 'logs'
+    };
+    
+    local base_env = {
+      CONFIG_DIR: paths.config,
+      SITES_DIR: paths.config_sites,
+      DATA_DIR: paths.data_daily,
+      STATUS_DIR: paths.status,
+      LOGS_DIR: paths.logs,
+      PYTHONUNBUFFERED: '1',
+      WORKFLOW_TYPE: workflow_type
+    };
+    
+    // 根据工作流类型添加特定环境变量
+    local analysis = if std.objectHas(global_config, 'analysis') then global_config.analysis else {
+      provider: 'gemini',
+      prompt_dir: 'config/analysis/prompts'
+    };
+    
+    local specific_env = 
+      if workflow_type == 'analyzer' then {
+        AI_PROVIDER: analysis.provider,
+        PROMPT_DIR: analysis.prompt_dir
+      }
+      else if workflow_type == 'crawler' then {
+        PROXY_ENABLED: std.toString(global_config.proxy.enabled)
+      }
+      else if workflow_type == 'proxy_pool' then {
+        PROXY_TIMEOUT: std.toString(30)
+      }
+      else {};
+    
+    base_env + specific_env,
+  
+  // 生成检出代码步骤
+  generateCheckoutStep(fetch_depth=1)::  
+    {
+      name: '检出代码',
+      uses: 'actions/checkout@v4',
+      [if fetch_depth != 1 then 'with']: {
+        'fetch-depth': fetch_depth
+      }
+    },
+
+  // 生成设置Python步骤
+  generatePythonSetupStep(python_version, cache_pip=true)::  
+    {
+      name: '设置Python',
+      uses: 'actions/setup-python@v5',
+      with: {
+        'python-version': python_version,
+        cache: if cache_pip then 'pip' else null
+      }
+    },
+
+  // 生成缓存步骤
+  generateCacheStep(cache_config, hashfiles_pattern)::  
+    {
+      name: '缓存依赖和数据',
+      [if cache_config.enabled then 'if']: 'true',
+      uses: 'actions/cache@v3',
+      with: {
+        path: std.join('\n', cache_config.paths),
+        key: cache_config.key_prefix + '-${{ hashFiles(\'' + hashfiles_pattern + '\') }}',
+        'restore-keys': cache_config.key_prefix + '-'
+      }
+    },
+
+  // 生成创建目录步骤
+  generateDirectorySetupStep(directories)::  
+    {
+      name: '创建必要目录',
+      run: std.join('\n', ['mkdir -p ' + dir for dir in directories])
+    },
+
   // 构建触发条件
   buildTriggers():: {
     workflow_dispatch: {
@@ -112,6 +299,56 @@
     }
   },
   
+  // 生成Git提交步骤
+  generateGitCommitStep(paths_to_add, commit_message)::  
+    local paths_array = if std.isArray(paths_to_add) then paths_to_add else [paths_to_add];
+    {
+      name: '提交更改',
+      run: |||
+        # 配置Git
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        
+        # 添加文件
+        %(add_commands)s
+        
+        # 提交更改
+        if git diff --staged --quiet; then
+          echo "没有变更需要提交"
+        else
+          git commit -m "%(commit_message)s"
+          git push
+          echo "✅ 成功提交更改"
+        fi
+      ||| % {
+        add_commands: std.join('\n', ['git add ' + std.strReplace(path, '"', '') for path in paths_array]),
+        commit_message: commit_message
+      }
+    },
+
+  // 生成工作流手动触发配置
+  generateWorkflowDispatchTrigger(inputs)::  
+    {
+      workflow_dispatch: {
+        inputs: inputs
+      }
+    },
+
+  // 生成定时触发配置
+  generateScheduleTrigger(cron_expression)::  
+    {
+      schedule: [
+        {cron: cron_expression}
+      ]
+    },
+
+  // 生成并发控制配置
+  generateConcurrencyConfig(workflow_type, id)::  
+    {
+      group: workflow_type + '-' + id + '-${{ github.ref }}',
+      'cancel-in-progress': true
+    },
+
   // 构建并发控制
   buildConcurrency(site_id):: {
     group: 'analyzer-' + site_id + '-${{ github.ref }}',

@@ -14,14 +14,28 @@ on:
         description: 是否使用代理
         required: false
         type: boolean
+permissions:
+  actions: write
+  contents: write
+env:
+  CONFIG_DIR: config
+  DATA_DIR: data/daily
+  ENGINE_TYPE: custom
+  LOGS_DIR: logs
+  PROXY_ENABLED: false
+  PYTHONUNBUFFERED: 1
+  SITES_DIR: config/sites
+  SITE_ID: '"heimao"'
+  STATUS_DIR: status
+  WORKFLOW_TYPE: crawler
 concurrency:
   cancel-in-progress: true
   group: crawler-"heimao"-${{ github.ref }}
 jobs:
   crawl:
     name: 运行爬虫
-    if: always() && needs.pre-check.outputs.site_config_valid == 'true' && (needs.check-proxy.result == 'success' || needs.pre-check.outputs.use_proxy
-      != 'true')
+    if: always() && needs.pre-check.outputs.site_config_valid == 'true' && (needs.check-proxy.result
+      == 'success' || needs.pre-check.outputs.use_proxy != 'true')
     needs:
       - pre-check
       - check-proxy
@@ -29,6 +43,9 @@ jobs:
     env:
       RUN_DATE: ${{ needs.pre-check.outputs.run_date }}
       USE_PROXY: ${{ needs.pre-check.outputs.use_proxy }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -36,8 +53,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           cache: pip
-          cache-dependency-path: '**/requirements.txt'
           python-version: '3.10'
+      - if: true
+        name: 缓存依赖和数据
+        uses: actions/cache@v3
+        with:
+          key: crawler-deps-"heimao"-custom-${{ hashFiles('requirements.txt') }}
+          path: "~/.cache/pip\ndata/\"heimao\"/cache"
+          restore-keys: crawler-deps-"heimao"-custom-
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
@@ -45,10 +68,10 @@ jobs:
             pip install -r requirements.txt
           else
             echo "安装必要的依赖..."
-            pip install requests beautifulsoup4 pyyaml
+            pip install ["requests>=2.31.0", "beautifulsoup4>=4.12.2", "lxml>=4.9.3", "fake-useragent>=1.0.0"]
           fi
-      - name: 创建输出目录
-        run: |
+      - name: 创建必要目录
+        run: |-
           mkdir -p data/"heimao"
           mkdir -p status/"heimao"
           mkdir -p logs
@@ -104,15 +127,15 @@ jobs:
           name: '"heimao"-logs-${{ needs.pre-check.outputs.run_date }}'
           path: logs/"heimao"_${{ needs.pre-check.outputs.run_date }}.log
           retention-days: 3
-      - name: 提交结果和状态
+      - name: 提交更改
         run: |
           # 配置Git
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           # 添加文件
-          git add data/"heimao"/
-          git add status/"heimao"/
+          git add data/heimao/
+          git add status/heimao/
 
           # 提交更改
           if git diff --staged --quiet; then
@@ -120,7 +143,7 @@ jobs:
           else
             git commit -m "🤖 自动更新: 黑猫投诉爬虫结果 ($RUN_DATE)"
             git push
-            echo "✅ 成功提交爬虫结果"
+            echo "✅ 成功提交更改"
           fi
   check-proxy:
     name: 检查代理可用性
@@ -133,7 +156,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: 设置Python环境
+      - name: 设置Python
         uses: actions/setup-python@v5
         with:
           cache: pip
@@ -148,7 +171,7 @@ jobs:
             pip install requests pyyaml
           fi
       - name: 创建必要目录
-        run: |
+        run: |-
           mkdir -p data/proxies
           mkdir -p status/proxies
           mkdir -p logs
@@ -157,24 +180,21 @@ jobs:
         run: |
           # 检查代理状态文件是否存在
           if [ -f "status/proxies/pool_status.json" ]; then
-            echo "发现代理池状态文件"
+            echo "找到代理池状态文件"
             
-            # 获取代理统计
-            if [ -x "$(command -v jq)" ]; then
-              valid_count=$(cat status/proxies/pool_status.json | jq '.stats.valid_count')
-            else
-              valid_count=$(grep -o '"valid_count":[0-9]*' status/proxies/pool_status.json | grep -o '[0-9]*')
-            fi
+            # 检查可用代理数量
+            VALID_COUNT=$(jq '.valid_count' status/proxies/pool_status.json)
+            THRESHOLD=5
             
-            echo "当前有效代理数: $valid_count"
+            echo "当前有效代理数: $VALID_COUNT"
+            echo "最低需求阈值: $THRESHOLD"
             
-            # 检查代理数量是否足够
-            if [ "$valid_count" -lt "5" ]; then
-              echo "⚠️ 代理数量不足 ($valid_count < 5)，需要更新代理池"
-              echo "sufficient=false" >> $GITHUB_OUTPUT
-            else
-              echo "✅ 代理数量充足 ($valid_count >= 5)"
+            if [ "$VALID_COUNT" -ge "$THRESHOLD" ]; then
+              echo "✅ 代理池状态良好，有足够的代理"
               echo "sufficient=true" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️ 代理池中的有效代理不足，需要更新"
+              echo "sufficient=false" >> $GITHUB_OUTPUT
             fi
           else
             echo "⚠️ 未找到代理池状态文件，需要初始化代理池"
@@ -186,44 +206,46 @@ jobs:
           echo "开始更新代理池..."
 
           # 尝试执行更新，如果失败则尝试恢复
-          if ! python scripts/proxy_manager.py --action update --source all; then
-            echo "更新失败，尝试恢复..."
-            if ! python scripts/proxy_manager.py --action recover; then
-              echo "恢复失败，尝试重建..."
-              python scripts/proxy_manager.py --action rebuild --source all
-            fi
-          fi
+          python scripts/proxy_manager.py update --min-count 10 --timeout 10
 
           # 检查更新后的状态
           if [ -f "status/proxies/pool_status.json" ]; then
-            if [ -x "$(command -v jq)" ]; then
-              valid_count=$(cat status/proxies/pool_status.json | jq '.stats.valid_count')
-            else
-              valid_count=$(grep -o '"valid_count":[0-9]*' status/proxies/pool_status.json | grep -o '[0-9]*')
+            valid_count=$(jq '.valid_count' status/proxies/pool_status.json)
+            echo "更新后的有效代理数: $valid_count"
+            
+            # 如果更新后代理仍然不足，尝试恢复备份
+            if [ "$valid_count" -lt "5" ] && [ -f "data/proxies/proxy_pool_backup.json" ]; then
+              echo "⚠️ 更新后代理仍然不足，尝试恢复备份..."
+              cp data/proxies/proxy_pool_backup.json data/proxies/proxy_pool.json
+              python scripts/proxy_manager.py validate --timeout 5
+              
+              if [ -f "status/proxies/pool_status.json" ]; then
+                valid_count=$(jq '.valid_count' status/proxies/pool_status.json)
+                echo "恢复备份后的有效代理数: $valid_count"
+              fi
             fi
             
             echo "更新后的有效代理数: $valid_count"
           else
             echo "⚠️ 更新后仍未找到代理池状态文件"
           fi
-      - if: steps.check_proxy_pool.outputs.sufficient == 'false'
-        name: 提交代理池状态
+      - name: 提交更改
         run: |
           # 配置Git
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 添加状态文件
-          git add status/proxies/pool_status.json
+          # 添加文件
           git add data/proxies/
+          git add status/proxies/
 
           # 提交更改
           if git diff --staged --quiet; then
-            echo "没有代理池状态变更，无需提交"
+            echo "没有变更需要提交"
           else
             git commit -m "🔄 爬虫任务前的代理池更新 (站点: "heimao")"
             git push
-            echo "✅ 成功提交代理池状态更新"
+            echo "✅ 成功提交更改"
           fi
   pre-check:
     name: 环境与配置检查
@@ -233,6 +255,7 @@ jobs:
       run_date: ${{ steps.prepare_env.outputs.date }}
       site_config_valid: ${{ steps.validate_config.outputs.valid }}
       use_proxy: ${{ steps.prepare_env.outputs.use_proxy }}
+    timeout-minutes: 10
     steps:
       - name: 检出代码
         uses: actions/checkout@v4

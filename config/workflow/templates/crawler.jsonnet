@@ -9,60 +9,50 @@ local site_config = std.parseJson(std.extVar('site_config'));
 local global_config = std.parseJson(std.extVar('global_config'));
 
 // 站点信息
-local site_name = if std.objectHas(site_config, 'site_info') && std.objectHas(site_config.site_info, 'name') then
-  site_config.site_info.name
-else
-  site_id + ' 站点';
+local site_name = utils.getSiteName(site_config, site_id);
 
 // 爬取配置
-local scraping_config = if std.objectHas(site_config, 'scraping') then
-  site_config.scraping
-else
-  {};
+local scraping_config = utils.getConfigSection(site_config, 'scraping', {});
 
 // 引擎类型
-local engine = if std.objectHas(scraping_config, 'engine') then
-  scraping_config.engine
-else
-  'custom';
+local engine = utils.getConfigValue(scraping_config, 'engine', 'custom');
 
 // 确定依赖项
-local dependencies = if engine == 'firecrawl' then
-  params.crawler.dependencies.firecrawl
-else if engine == 'playwright' then
-  params.crawler.dependencies.playwright
-else
-  params.crawler.dependencies.default;
+local dependencies = utils.getCrawlerDependencies(engine, params.dependencies);
+
+// 缓存配置
+local cache_config = utils.generateCacheConfig('crawler', site_id, engine);
+
+// 超时设置
+local crawl_timeout = utils.getJobTimeout('crawl', global_config);
+local setup_timeout = utils.getJobTimeout('setup', global_config);
+
+// 错误处理策略
+local crawl_error_strategy = utils.getErrorHandlingStrategy('crawl', global_config);
+
+// 环境变量
+local workflow_env = utils.generateWorkflowEnv('crawler', global_config) + {
+  SITE_ID: site_id,
+  ENGINE_TYPE: engine
+};
 
 // 确定cron表达式
 local schedule = if std.objectHas(scraping_config, 'schedule') then
   scraping_config.schedule
 else
-  params.global.default_cron;
+  params.schedules.master;
 
 // 确定输出文件名
-local output_filename = if std.objectHas(site_config, 'output') && std.objectHas(site_config.output, 'filename') then
-  site_config.output.filename
-else if std.objectHas(site_config, 'site_info') && std.objectHas(site_config.site_info, 'output_filename') then
-  site_config.site_info.output_filename
-else
-  site_id + '_data.json';
+local output_filename = utils.getConfigValue(site_config, 'output.filename', 
+                         utils.getConfigValue(site_config, 'site_info.output_filename', 
+                         site_id + '_data.json'));
 
 // 检查是否需要运行分析
-local run_analysis = if std.objectHas(site_config, 'analysis') && std.objectHas(site_config.analysis, 'enabled') then
-  site_config.analysis.enabled
-else
-  true;
+local run_analysis = utils.getConfigValue(site_config, 'analysis.enabled', true);
 
 // 检查代理配置
-local proxy_config = if std.objectHas(scraping_config, 'proxy') then
-  scraping_config.proxy
-else
-  {};
-local use_proxy = if std.objectHas(proxy_config, 'enabled') then
-  proxy_config.enabled
-else
-  false;
+local proxy_config = utils.getConfigSection(scraping_config, 'proxy', {});
+local use_proxy = utils.getConfigValue(proxy_config, 'enabled', false);
 
 // 环境变量
 local env_vars = if std.objectHas(scraping_config, 'api') && std.objectHas(scraping_config.api, 'key_env') then
@@ -77,38 +67,38 @@ else
   name: site_name + ' 爬虫',
   'run-name': '🕷️ ' + site_name + ' 爬虫 #${{ github.run_number }} (${{ github.actor }})',
   
-  on: {
-    workflow_dispatch: {
-      inputs: {
-        date: {
-          description: '数据日期 (留空则使用当前日期)',
-          required: false,
-          type: 'string'
-        },
-        use_proxy: {
-          description: '是否使用代理',
-          required: false,
-          type: 'boolean',
-          default: use_proxy
-        }
-      }
-    },
-    schedule: [
-      {cron: schedule}
-    ]
+  // 定义工作流的权限
+  permissions: {
+    contents: 'write',  // 允许推送到仓库
+    actions: 'write'    // 允许触发其他工作流
   },
   
+  on: utils.generateWorkflowDispatchTrigger({
+    date: {
+      description: '数据日期 (留空则使用当前日期)',
+      required: false,
+      type: 'string'
+    },
+    use_proxy: {
+      description: '是否使用代理',
+      required: false,
+      type: 'boolean',
+      default: use_proxy
+    }
+  }) + utils.generateScheduleTrigger(schedule),
+  
   // 并发控制 - 避免相同站点的任务并行运行
-  concurrency: {
-    group: 'crawler-' + site_id + '-${{ github.ref }}',
-    'cancel-in-progress': true
-  },
+  concurrency: utils.generateConcurrencyConfig('crawler', site_id),
+  
+  // 全局环境变量
+  env: workflow_env,
   
   jobs: {
     // 预检查作业
     'pre-check': {
       name: '环境与配置检查',
-      'runs-on': params.global.runner,
+      'runs-on': params.runtime.runner,
+      'timeout-minutes': setup_timeout,
       outputs: {
         run_date: '${{ steps.prepare_env.outputs.date }}',
         cache_key: '${{ steps.prepare_env.outputs.cache_key }}',
@@ -116,10 +106,7 @@ else
         use_proxy: '${{ steps.prepare_env.outputs.use_proxy }}'
       },
       steps: [
-        {
-          name: '检出代码',
-          uses: 'actions/checkout@v4'
-        },
+        utils.generateCheckoutStep(),
         {
           name: '准备环境变量',
           id: 'prepare_env',
@@ -169,23 +156,10 @@ else
       name: '检查代理可用性',
       needs: ['pre-check'],
       'if': "needs.pre-check.outputs.use_proxy == 'true'",
-      'runs-on': params.global.runner,
+      'runs-on': params.runtime.runner,
       steps: [
-        {
-          name: '检出代码',
-          uses: 'actions/checkout@v4',
-          with: {
-            'fetch-depth': 0
-          }
-        },
-        {
-          name: '设置Python环境',
-          uses: 'actions/setup-python@v5',
-          with: {
-            'python-version': params.global.python_version,
-            cache: 'pip'
-          }
-        },
+        utils.generateCheckoutStep(0),
+        utils.generatePythonSetupStep(params.runtime.python_version, true),
         {
           name: '安装依赖',
           run: |||
@@ -198,38 +172,28 @@ else
             fi
           |||
         },
-        {
-          name: '创建必要目录',
-          run: |||
-            mkdir -p data/proxies
-            mkdir -p status/proxies
-            mkdir -p logs
-          |||
-        },
+        utils.generateDirectorySetupStep(['data/proxies', 'status/proxies', 'logs']),
         {
           name: '检查代理池状态',
           id: 'check_proxy_pool',
           run: |||
             # 检查代理状态文件是否存在
             if [ -f "status/proxies/pool_status.json" ]; then
-              echo "发现代理池状态文件"
+              echo "找到代理池状态文件"
               
-              # 获取代理统计
-              if [ -x "$(command -v jq)" ]; then
-                valid_count=$(cat status/proxies/pool_status.json | jq '.stats.valid_count')
-              else
-                valid_count=$(grep -o '"valid_count":[0-9]*' status/proxies/pool_status.json | grep -o '[0-9]*')
-              fi
+              # 检查可用代理数量
+              VALID_COUNT=$(jq '.valid_count' status/proxies/pool_status.json)
+              THRESHOLD=5
               
-              echo "当前有效代理数: $valid_count"
+              echo "当前有效代理数: $VALID_COUNT"
+              echo "最低需求阈值: $THRESHOLD"
               
-              # 检查代理数量是否足够
-              if [ "$valid_count" -lt "5" ]; then
-                echo "⚠️ 代理数量不足 ($valid_count < 5)，需要更新代理池"
-                echo "sufficient=false" >> $GITHUB_OUTPUT
-              else
-                echo "✅ 代理数量充足 ($valid_count >= 5)"
+              if [ "$VALID_COUNT" -ge "$THRESHOLD" ]; then
+                echo "✅ 代理池状态良好，有足够的代理"
                 echo "sufficient=true" >> $GITHUB_OUTPUT
+              else
+                echo "⚠️ 代理池中的有效代理不足，需要更新"
+                echo "sufficient=false" >> $GITHUB_OUTPUT
               fi
             else
               echo "⚠️ 未找到代理池状态文件，需要初始化代理池"
@@ -244,20 +208,23 @@ else
             echo "开始更新代理池..."
             
             # 尝试执行更新，如果失败则尝试恢复
-            if ! python scripts/proxy_manager.py --action update --source all; then
-              echo "更新失败，尝试恢复..."
-              if ! python scripts/proxy_manager.py --action recover; then
-                echo "恢复失败，尝试重建..."
-                python scripts/proxy_manager.py --action rebuild --source all
-              fi
-            fi
+            python scripts/proxy_manager.py update --min-count 10 --timeout 10
             
             # 检查更新后的状态
             if [ -f "status/proxies/pool_status.json" ]; then
-              if [ -x "$(command -v jq)" ]; then
-                valid_count=$(cat status/proxies/pool_status.json | jq '.stats.valid_count')
-              else
-                valid_count=$(grep -o '"valid_count":[0-9]*' status/proxies/pool_status.json | grep -o '[0-9]*')
+              valid_count=$(jq '.valid_count' status/proxies/pool_status.json)
+              echo "更新后的有效代理数: $valid_count"
+              
+              # 如果更新后代理仍然不足，尝试恢复备份
+              if [ "$valid_count" -lt "5" ] && [ -f "data/proxies/proxy_pool_backup.json" ]; then
+                echo "⚠️ 更新后代理仍然不足，尝试恢复备份..."
+                cp data/proxies/proxy_pool_backup.json data/proxies/proxy_pool.json
+                python scripts/proxy_manager.py validate --timeout 5
+                
+                if [ -f "status/proxies/pool_status.json" ]; then
+                  valid_count=$(jq '.valid_count' status/proxies/pool_status.json)
+                  echo "恢复备份后的有效代理数: $valid_count"
+                fi
               fi
               
               echo "更新后的有效代理数: $valid_count"
@@ -266,28 +233,10 @@ else
             fi
           |||
         },
-        {
-          name: '提交代理池状态',
-          'if': "steps.check_proxy_pool.outputs.sufficient == 'false'",
-          run: |||
-            # 配置Git
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            
-            # 添加状态文件
-            git add status/proxies/pool_status.json
-            git add data/proxies/
-            
-            # 提交更改
-            if git diff --staged --quiet; then
-              echo "没有代理池状态变更，无需提交"
-            else
-              git commit -m "🔄 爬虫任务前的代理池更新 (站点: %(site_id)s)"
-              git push
-              echo "✅ 成功提交代理池状态更新"
-            fi
-          ||| % {site_id: site_id}
-        }
+        utils.generateGitCommitStep(
+          ["data/proxies/", "status/proxies/"],
+          "🔄 爬虫任务前的代理池更新 (站点: " + site_id + ")"
+        )
       ]
     },
     
@@ -296,25 +245,19 @@ else
       name: '运行爬虫',
       needs: ['pre-check', 'check-proxy'],
       'if': "always() && needs.pre-check.outputs.site_config_valid == 'true' && (needs.check-proxy.result == 'success' || needs.pre-check.outputs.use_proxy != 'true')",
-      'runs-on': params.global.runner,
+      'runs-on': params.runtime.runner,
+      'timeout-minutes': crawl_timeout,
+      strategy: {
+        'fail-fast': crawl_error_strategy['fail-fast']
+      },
       env: {
         RUN_DATE: '${{ needs.pre-check.outputs.run_date }}',
         USE_PROXY: '${{ needs.pre-check.outputs.use_proxy }}'
       },
       steps: [
-        {
-          name: '检出代码',
-          uses: 'actions/checkout@v4'
-        },
-        {
-          name: '设置Python',
-          uses: 'actions/setup-python@v5',
-          with: {
-            'python-version': params.global.python_version,
-            cache: 'pip',
-            'cache-dependency-path': '**/requirements.txt'
-          }
-        },
+        utils.generateCheckoutStep(),
+        utils.generatePythonSetupStep(params.runtime.python_version, true),
+        utils.generateCacheStep(cache_config, 'requirements.txt'),
         {
           name: '安装依赖',
           run: |||
@@ -327,14 +270,7 @@ else
             fi
           ||| % {dependencies: dependencies}
         },
-        {
-          name: '创建输出目录',
-          run: |||
-            mkdir -p data/%(site_id)s
-            mkdir -p status/%(site_id)s
-            mkdir -p logs
-          ||| % {site_id: site_id}
-        },
+        utils.generateDirectorySetupStep(['data/' + site_id, 'status/' + site_id, 'logs']),
         {
           name: '运行爬虫',
           id: 'run_scraper',
@@ -405,27 +341,10 @@ else
             'retention-days': 3
           }
         },
-        {
-          name: '提交结果和状态',
-          run: |||
-            # 配置Git
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            
-            # 添加文件
-            git add data/%(site_id)s/
-            git add status/%(site_id)s/
-            
-            # 提交更改
-            if git diff --staged --quiet; then
-              echo "没有变更需要提交"
-            else
-              git commit -m "🤖 自动更新: %(site_name)s爬虫结果 ($RUN_DATE)"
-              git push
-              echo "✅ 成功提交爬虫结果"
-            fi
-          ||| % {site_id: site_id, site_name: site_name}
-        }
+        utils.generateGitCommitStep(
+          ["data/" + site_id + "/", "status/" + site_id + "/"],
+          "🤖 自动更新: " + site_name + "爬虫结果 ($RUN_DATE)"
+        )
       ]
     }
   }

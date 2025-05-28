@@ -9,21 +9,23 @@ import sys
 import argparse
 import logging
 from pathlib import Path
+import json
 
 # 添加项目根目录到Python路径
 sys.path.append(str(Path(__file__).parent.parent))
 
 from scripts.workflow_generator.jsonnet_generator import JsonnetWorkflowGenerator
+from scripts.workflow_generator.validators import WorkflowValidator
 
 
-def setup_logger():
+def setup_logger(debug=False):
     """设置日志记录器"""
     logger = logging.getLogger('workflow_generator')
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG if debug else logging.INFO)
     
     # 创建控制台处理器
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(logging.DEBUG if debug else logging.INFO)
     
     # 创建格式化器
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -44,18 +46,62 @@ def main():
     parser.add_argument('--output-dir', '-o', help='指定输出目录')
     parser.add_argument('--settings', help='指定设置文件路径')
     parser.add_argument('--sites-dir', help='指定站点配置目录')
+    parser.add_argument('--debug', '-d', action='store_true', help='启用调试模式，输出更详细的日志')
+    parser.add_argument('--validate-only', '-v', action='store_true', 
+                        help='仅验证工作流文件而不生成，需要与--file参数一起使用')
+    parser.add_argument('--file', '-f', help='指定要验证的工作流文件路径，与--validate-only一起使用')
     
     args = parser.parse_args()
     
     # 设置日志记录器
-    logger = setup_logger()
+    logger = setup_logger(args.debug)
+    
+    # 如果只是验证工作流文件，则直接验证并返回
+    if args.validate_only:
+        if not args.file:
+            logger.error("使用--validate-only时必须指定--file参数")
+            return 1
+            
+        file_path = Path(args.file)
+        if not file_path.exists():
+            logger.error(f"指定的文件不存在: {file_path}")
+            return 1
+            
+        validator = WorkflowValidator(logger=logger)
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            is_valid, errors, warnings = validator.validate_with_warnings(content)
+            
+            # 输出警告信息（如果有）
+            if warnings:
+                logger.warning(f"工作流文件验证警告: {file_path}")
+                for warning in warnings:
+                    logger.warning(f"  - {warning}")
+            
+            # 如果有严重错误，返回错误代码
+            if not is_valid:
+                logger.error(f"工作流文件验证失败: {file_path}")
+                for error in errors:
+                    logger.error(f"  - {error}")
+                return 1
+            else:
+                # 没有严重错误，只有警告或没有问题
+                logger.info(f"工作流文件验证通过: {file_path}")
+                return 0
+                
+        except Exception as e:
+            logger.error(f"验证过程中发生错误: {e}")
+            return 1
     
     # 创建工作流生成器
     generator = JsonnetWorkflowGenerator(
         settings_path=args.settings,
         sites_dir=args.sites_dir,
         output_dir=args.output_dir,
-        logger=logger
+        logger=logger,
+        validate_output=True  # 启用对生成的工作流文件进行验证
     )
     
     # 根据参数生成工作流

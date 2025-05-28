@@ -12,20 +12,40 @@ permissions:
   contents: write
   id-token: write
   pages: write
+env:
+  CONFIG_DIR: config
+  DATA_DIR: data/daily
+  LOGS_DIR: logs
+  PYTHONUNBUFFERED: 1
+  SITES_DIR: config/sites
+  STATUS_DIR: status
+  WORKFLOW_TYPE: dashboard
 jobs:
   build:
     name: 构建仪表盘
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: false
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
       - name: 设置Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           cache: pip
           python-version: '3.10'
+      - if: true
+        name: 缓存依赖和数据
+        uses: actions/cache@v3
+        with:
+          key: dashboard-deps-main-${{ hashFiles('**/requirements.txt, dashboard/templates/**')
+            }}
+          path: "~/.cache/pip\ndashboard/cache"
+          restore-keys: dashboard-deps-main-
+      - name: 创建必要目录
+        run: mkdir -p dashboard/cache
       - name: 安装依赖
-        run: pip install pandas pyyaml requests beautifulsoup4 jinja2
+        run: pip install pandas>=2.0.3 jinja2>=3.1.0 matplotlib>=3.7.0 plotly>=5.14.0
       - id: set-date
         name: 设置日期
         run: |
