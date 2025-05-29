@@ -1,0 +1,16 @@
+{
+  "workflow_id": "15313805489",
+  "trigger": "schedule",
+  "action": "定时任务",
+  "date": "2025-05-29",
+  "sites": ["advanced_antidetect","heimao","heimao_ai_summary","pm001"],
+  "timestamp": "2025-05-29T01:00:04Z",
+  "results": {
+    "setup": "success",
+    "proxy_pool": "success",
+    "crawl": "success",
+    "analyze": "success",
+    "dashboard": "failure"
+  },
+  "url": "https://github.com/bageyalu160/universal-scraper-auto/actions/runs/15313805489"
+}
