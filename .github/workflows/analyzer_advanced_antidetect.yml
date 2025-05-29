@@ -1,5 +1,5 @@
-name: '"advanced_antidetect" ("advanced_antidetect") 数据分析'
-run-name: '🧠 "advanced_antidetect" ("advanced_antidetect") 数据分析 #${{ github.run_number
+name: advanced_antidetect (advanced_antidetect) 数据分析
+run-name: '🧠 advanced_antidetect (advanced_antidetect) 数据分析 #${{ github.run_number
   }} (${{ github.actor }})'
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ on:
         required: true
         type: string
       site_id:
-        default: '"advanced_antidetect"'
+        default: advanced_antidetect
         description: 站点ID
         required: true
         type: string
@@ -48,17 +48,17 @@ jobs:
         name: 缓存依赖和数据
         uses: actions/cache@v3
         with:
-          key: analyzer-deps-"advanced_antidetect"-openai-${{ hashFiles('**/requirements.txt,
-            config/sites/"advanced_antidetect".yaml') }}
-          path: "~/.cache/pip\nanalysis/\"advanced_antidetect\"/cache"
-          restore-keys: analyzer-deps-"advanced_antidetect"-openai-
+          key: analyzer-deps-advanced_antidetect-openai-${{ hashFiles('**/requirements.txt,
+            config/sites/advanced_antidetect.yaml') }}
+          path: "~/.cache/pip\nanalysis/advanced_antidetect/cache"
+          restore-keys: analyzer-deps-advanced_antidetect-openai-
       - name: 安装依赖
         run: pip install pandas>=2.0.3 openai>=1.0.0 google-generativeai>=0.3.1 numpy>=1.22.0
           openai>=1.0.0
       - name: 创建必要目录
         run: |-
-          mkdir -p analysis/"advanced_antidetect"
-          mkdir -p analysis/"advanced_antidetect"/cache
+          mkdir -p analysis/advanced_antidetect
+          mkdir -p analysis/advanced_antidetect/cache
       - env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -66,15 +66,16 @@ jobs:
         name: 运行分析
         run: |
           python scripts/ai_analyzer.py \
-            --site "${{ github.event.inputs.site_id }}" \
+            --site ${{ github.event.inputs.site_id }} \
             --date "${{ github.event.inputs.data_date }}" \
-            --input "${{ github.event.inputs.data_file }}" \
-            --output "analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json" \
-            --prompt-template "default" \
-            --provider "openai"
+            --input ${{ github.event.inputs.data_file }} \
+            --output analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json \
+            --prompt-template default \
+            --provider openai
       - name: 上传分析结果
         uses: actions/upload-artifact@v4
         with:
+          if-no-files-found: warn
           name: ${{ github.event.inputs.site_id }}-analysis-${{ github.event.inputs.data_date
             }}
           path: analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id
@@ -93,7 +94,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "没有变更需要提交"
           else
-            git commit -m "🧠 自动更新: "advanced_antidetect"分析结果 (${{ github.event.inputs.data_date }})"
+            git commit -m "🧠 自动更新: advanced_antidetect分析结果 (${{ github.event.inputs.data_date }})"
             git push
             echo "✅ 成功提交更改"
           fi

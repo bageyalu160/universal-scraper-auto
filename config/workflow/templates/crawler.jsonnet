@@ -295,9 +295,9 @@ else
             python scripts/scraper.py \
               --site %(site_id)s \
               --date "$RUN_DATE" \
-              --output "data/%(site_id)s/%(output_filename)s" \
-              --status "status/%(site_id)s/status.json" \
-              --log-file "logs/%(site_id)s_$RUN_DATE.log" \
+              --output data/%(site_id)s/%(output_filename)s \
+              --status status/%(site_id)s/status.json \
+              --log-file logs/%(site_id)s_$RUN_DATE.log \
               $PROXY_ARG
             
             # 检查结果
@@ -320,7 +320,8 @@ else
           with: {
             name: site_id + '-data-${{ needs.pre-check.outputs.run_date }}',
             path: 'data/' + site_id + '/' + output_filename,
-            'retention-days': 7
+            'retention-days': 7,
+            'if-no-files-found': 'warn'
           }
         },
         {
@@ -329,7 +330,8 @@ else
           with: {
             name: site_id + '-status-${{ needs.pre-check.outputs.run_date }}',
             path: 'status/' + site_id + '/status.json',
-            'retention-days': 7
+            'retention-days': 7,
+            'if-no-files-found': 'warn'
           }
         },
         {
@@ -338,7 +340,8 @@ else
           with: {
             name: site_id + '-logs-${{ needs.pre-check.outputs.run_date }}',
             path: 'logs/' + site_id + '_${{ needs.pre-check.outputs.run_date }}.log',
-            'retention-days': 3
+            'retention-days': 3,
+            'if-no-files-found': 'warn'
           }
         },
         utils.generateGitCommitStep(

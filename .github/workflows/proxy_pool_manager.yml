@@ -211,6 +211,7 @@ jobs:
         name: 上传代理池文件
         uses: actions/upload-artifact@v4
         with:
+          if-no-files-found: warn
           name: proxy-pool-${{ github.run_number }}
           path: "data/proxies/proxy_pool.json\nstatus/proxies/pool_status.json\nlogs/proxy_*.log\n"
           retention-days: 7
@@ -298,7 +299,7 @@ jobs:
           NEEDS_UPDATE="false"
 
           # 检查状态文件
-          if [ -f "status/proxies/pool_status.json" ]; then
+          if [ -f status/proxies/pool_status.json ]; then
             echo "✅ 发现代理池状态文件"
             
             # 解析状态信息

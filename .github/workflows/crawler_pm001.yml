@@ -1,5 +1,5 @@
-name: PM001 ("pm001") 爬虫
-run-name: '🕷️ PM001 ("pm001") 爬虫 #${{ github.run_number }} (${{ github.actor }})'
+name: PM001 (pm001) 爬虫
+run-name: '🕷️ PM001 (pm001) 爬虫 #${{ github.run_number }} (${{ github.actor }})'
 on:
   schedule:
     - cron: 0 0 * * *
@@ -25,12 +25,12 @@ env:
   PROXY_ENABLED: false
   PYTHONUNBUFFERED: 1
   SITES_DIR: config/sites
-  SITE_ID: '"pm001"'
+  SITE_ID: pm001
   STATUS_DIR: status
   WORKFLOW_TYPE: crawler
 concurrency:
   cancel-in-progress: true
-  group: crawler-"pm001"-${{ github.ref }}
+  group: crawler-pm001-${{ github.ref }}
 jobs:
   crawl:
     name: 运行爬虫
@@ -58,9 +58,9 @@ jobs:
         name: 缓存依赖和数据
         uses: actions/cache@v3
         with:
-          key: crawler-deps-"pm001"-custom-${{ hashFiles('requirements.txt') }}
-          path: "~/.cache/pip\ndata/\"pm001\"/cache"
-          restore-keys: crawler-deps-"pm001"-custom-
+          key: crawler-deps-pm001-custom-${{ hashFiles('requirements.txt') }}
+          path: "~/.cache/pip\ndata/pm001/cache"
+          restore-keys: crawler-deps-pm001-custom-
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
@@ -72,15 +72,15 @@ jobs:
           fi
       - name: 创建必要目录
         run: |-
-          mkdir -p data/"pm001"
-          mkdir -p status/"pm001"
+          mkdir -p data/pm001
+          mkdir -p status/pm001
           mkdir -p logs
       - continue-on-error: true
         env: {}
         id: run_scraper
         name: 运行爬虫
         run: |
-          echo "🕷️ 开始爬取数据: "pm001""
+          echo "🕷️ 开始爬取数据: pm001"
           echo "📅 运行日期: $RUN_DATE"
           echo "🔄 使用代理: $USE_PROXY"
 
@@ -93,15 +93,15 @@ jobs:
 
           # 执行爬虫
           python scripts/scraper.py \
-            --site "pm001" \
+            --site pm001 \
             --date "$RUN_DATE" \
-            --output "data/"pm001"/"pm001"_data.json" \
-            --status "status/"pm001"/status.json" \
-            --log-file "logs/"pm001"_$RUN_DATE.log" \
+            --output data/pm001/pm001_data.json \
+            --status status/pm001/status.json \
+            --log-file logs/pm001_$RUN_DATE.log \
             $PROXY_ARG
 
           # 检查结果
-          if [ -f "data/"pm001"/"pm001"_data.json" ]; then
+          if [ -f "data/pm001/pm001_data.json" ]; then
             echo "scraper_success=true" >> $GITHUB_OUTPUT
             echo "✅ 爬虫执行成功"
           else
@@ -112,20 +112,23 @@ jobs:
         name: 上传数据文件
         uses: actions/upload-artifact@v4
         with:
-          name: '"pm001"-data-${{ needs.pre-check.outputs.run_date }}'
-          path: data/"pm001"/"pm001"_data.json
+          if-no-files-found: warn
+          name: pm001-data-${{ needs.pre-check.outputs.run_date }}
+          path: data/pm001/pm001_data.json
           retention-days: 7
       - name: 上传状态文件
         uses: actions/upload-artifact@v4
         with:
-          name: '"pm001"-status-${{ needs.pre-check.outputs.run_date }}'
-          path: status/"pm001"/status.json
+          if-no-files-found: warn
+          name: pm001-status-${{ needs.pre-check.outputs.run_date }}
+          path: status/pm001/status.json
           retention-days: 7
       - name: 上传日志文件
         uses: actions/upload-artifact@v4
         with:
-          name: '"pm001"-logs-${{ needs.pre-check.outputs.run_date }}'
-          path: logs/"pm001"_${{ needs.pre-check.outputs.run_date }}.log
+          if-no-files-found: warn
+          name: pm001-logs-${{ needs.pre-check.outputs.run_date }}
+          path: logs/pm001_${{ needs.pre-check.outputs.run_date }}.log
           retention-days: 3
       - name: 提交更改
         run: |
@@ -243,7 +246,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "没有变更需要提交"
           else
-            git commit -m "🔄 爬虫任务前的代理池更新 (站点: "pm001")"
+            git commit -m "🔄 爬虫任务前的代理池更新 (站点: pm001)"
             git push
             echo "✅ 成功提交更改"
           fi
@@ -274,9 +277,9 @@ jobs:
           # 生成缓存键
           if [ -f "requirements.txt" ]; then
             HASH=$(sha256sum requirements.txt | cut -d ' ' -f 1 | head -c 8)
-            echo "cache_key=deps-"pm001"-$HASH-v1" >> $GITHUB_OUTPUT
+            echo "cache_key=deps-pm001-$HASH-v1" >> $GITHUB_OUTPUT
           else
-            echo "cache_key=deps-"pm001"-default-v1" >> $GITHUB_OUTPUT
+            echo "cache_key=deps-pm001-default-v1" >> $GITHUB_OUTPUT
           fi
 
           # 设置是否使用代理
@@ -286,7 +289,7 @@ jobs:
       - id: validate_config
         name: 验证站点配置
         run: |
-          if [ -f "config/sites/"pm001".yaml" ]; then
+          if [ -f "config/sites/pm001.yaml" ]; then
             echo "✅ 站点配置有效"
             echo "valid=true" >> $GITHUB_OUTPUT
           else

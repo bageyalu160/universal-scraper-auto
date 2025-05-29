@@ -114,7 +114,7 @@ local min_proxy_threshold = utils.getConfigValue(proxy_config, 'min_threshold', 
             NEEDS_UPDATE="false"
             
             # 检查状态文件
-            if [ -f "status/proxies/pool_status.json" ]; then
+            if [ -f status/proxies/pool_status.json ]; then
               echo "✅ 发现代理池状态文件"
               
               # 解析状态信息
@@ -354,7 +354,8 @@ local min_proxy_threshold = utils.getConfigValue(proxy_config, 'min_threshold', 
               status/proxies/pool_status.json
               logs/proxy_*.log
             |||,
-            'retention-days': 7
+            'retention-days': 7,
+            'if-no-files-found': 'warn'
           }
         },
         utils.generateGitCommitStep(

@@ -1,5 +1,5 @@
-name: '"advanced_antidetect" ("advanced_antidetect") 爬虫'
-run-name: '🕷️ "advanced_antidetect" ("advanced_antidetect") 爬虫 #${{ github.run_number
+name: advanced_antidetect (advanced_antidetect) 爬虫
+run-name: '🕷️ advanced_antidetect (advanced_antidetect) 爬虫 #${{ github.run_number
   }} (${{ github.actor }})'
 on:
   schedule:
@@ -26,12 +26,12 @@ env:
   PROXY_ENABLED: false
   PYTHONUNBUFFERED: 1
   SITES_DIR: config/sites
-  SITE_ID: '"advanced_antidetect"'
+  SITE_ID: advanced_antidetect
   STATUS_DIR: status
   WORKFLOW_TYPE: crawler
 concurrency:
   cancel-in-progress: true
-  group: crawler-"advanced_antidetect"-${{ github.ref }}
+  group: crawler-advanced_antidetect-${{ github.ref }}
 jobs:
   crawl:
     name: 运行爬虫
@@ -59,10 +59,10 @@ jobs:
         name: 缓存依赖和数据
         uses: actions/cache@v3
         with:
-          key: crawler-deps-"advanced_antidetect"-custom-${{ hashFiles('requirements.txt')
+          key: crawler-deps-advanced_antidetect-custom-${{ hashFiles('requirements.txt')
             }}
-          path: "~/.cache/pip\ndata/\"advanced_antidetect\"/cache"
-          restore-keys: crawler-deps-"advanced_antidetect"-custom-
+          path: "~/.cache/pip\ndata/advanced_antidetect/cache"
+          restore-keys: crawler-deps-advanced_antidetect-custom-
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
@@ -74,15 +74,15 @@ jobs:
           fi
       - name: 创建必要目录
         run: |-
-          mkdir -p data/"advanced_antidetect"
-          mkdir -p status/"advanced_antidetect"
+          mkdir -p data/advanced_antidetect
+          mkdir -p status/advanced_antidetect
           mkdir -p logs
       - continue-on-error: true
         env: {}
         id: run_scraper
         name: 运行爬虫
         run: |
-          echo "🕷️ 开始爬取数据: "advanced_antidetect""
+          echo "🕷️ 开始爬取数据: advanced_antidetect"
           echo "📅 运行日期: $RUN_DATE"
           echo "🔄 使用代理: $USE_PROXY"
 
@@ -95,15 +95,15 @@ jobs:
 
           # 执行爬虫
           python scripts/scraper.py \
-            --site "advanced_antidetect" \
+            --site advanced_antidetect \
             --date "$RUN_DATE" \
-            --output "data/"advanced_antidetect"/data/advanced_antidetect_data.json" \
-            --status "status/"advanced_antidetect"/status.json" \
-            --log-file "logs/"advanced_antidetect"_$RUN_DATE.log" \
+            --output data/advanced_antidetect/data/advanced_antidetect_data.json \
+            --status status/advanced_antidetect/status.json \
+            --log-file logs/advanced_antidetect_$RUN_DATE.log \
             $PROXY_ARG
 
           # 检查结果
-          if [ -f "data/"advanced_antidetect"/data/advanced_antidetect_data.json" ]; then
+          if [ -f "data/advanced_antidetect/data/advanced_antidetect_data.json" ]; then
             echo "scraper_success=true" >> $GITHUB_OUTPUT
             echo "✅ 爬虫执行成功"
           else
@@ -114,21 +114,23 @@ jobs:
         name: 上传数据文件
         uses: actions/upload-artifact@v4
         with:
-          name: '"advanced_antidetect"-data-${{ needs.pre-check.outputs.run_date }}'
-          path: data/"advanced_antidetect"/data/advanced_antidetect_data.json
+          if-no-files-found: warn
+          name: advanced_antidetect-data-${{ needs.pre-check.outputs.run_date }}
+          path: data/advanced_antidetect/data/advanced_antidetect_data.json
           retention-days: 7
       - name: 上传状态文件
         uses: actions/upload-artifact@v4
         with:
-          name: '"advanced_antidetect"-status-${{ needs.pre-check.outputs.run_date
-            }}'
-          path: status/"advanced_antidetect"/status.json
+          if-no-files-found: warn
+          name: advanced_antidetect-status-${{ needs.pre-check.outputs.run_date }}
+          path: status/advanced_antidetect/status.json
           retention-days: 7
       - name: 上传日志文件
         uses: actions/upload-artifact@v4
         with:
-          name: '"advanced_antidetect"-logs-${{ needs.pre-check.outputs.run_date }}'
-          path: logs/"advanced_antidetect"_${{ needs.pre-check.outputs.run_date }}.log
+          if-no-files-found: warn
+          name: advanced_antidetect-logs-${{ needs.pre-check.outputs.run_date }}
+          path: logs/advanced_antidetect_${{ needs.pre-check.outputs.run_date }}.log
           retention-days: 3
       - name: 提交更改
         run: |
@@ -144,7 +146,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "没有变更需要提交"
           else
-            git commit -m "🤖 自动更新: "advanced_antidetect"爬虫结果 ($RUN_DATE)"
+            git commit -m "🤖 自动更新: advanced_antidetect爬虫结果 ($RUN_DATE)"
             git push
             echo "✅ 成功提交更改"
           fi
@@ -246,7 +248,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "没有变更需要提交"
           else
-            git commit -m "🔄 爬虫任务前的代理池更新 (站点: "advanced_antidetect")"
+            git commit -m "🔄 爬虫任务前的代理池更新 (站点: advanced_antidetect)"
             git push
             echo "✅ 成功提交更改"
           fi
@@ -277,9 +279,9 @@ jobs:
           # 生成缓存键
           if [ -f "requirements.txt" ]; then
             HASH=$(sha256sum requirements.txt | cut -d ' ' -f 1 | head -c 8)
-            echo "cache_key=deps-"advanced_antidetect"-$HASH-v1" >> $GITHUB_OUTPUT
+            echo "cache_key=deps-advanced_antidetect-$HASH-v1" >> $GITHUB_OUTPUT
           else
-            echo "cache_key=deps-"advanced_antidetect"-default-v1" >> $GITHUB_OUTPUT
+            echo "cache_key=deps-advanced_antidetect-default-v1" >> $GITHUB_OUTPUT
           fi
 
           # 设置是否使用代理
@@ -289,7 +291,7 @@ jobs:
       - id: validate_config
         name: 验证站点配置
         run: |
-          if [ -f "config/sites/"advanced_antidetect".yaml" ]; then
+          if [ -f "config/sites/advanced_antidetect.yaml" ]; then
             echo "✅ 站点配置有效"
             echo "valid=true" >> $GITHUB_OUTPUT
           else

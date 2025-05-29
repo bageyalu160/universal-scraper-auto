@@ -58,9 +58,9 @@ jobs:
         run: |
           python scripts/dashboard_generator.py \
             --date "${{ steps.set-date.outputs.date }}" \
-            --data-dir "data" \
-            --analysis-dir "analysis" \
-            --output-dir "dashboard"
+            --data-dir data \
+            --analysis-dir analysis \
+            --output-dir dashboard
       - name: 设置Pages
         uses: actions/configure-pages@v3
       - name: 上传Pages构建产物

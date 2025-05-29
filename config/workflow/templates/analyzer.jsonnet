@@ -91,12 +91,12 @@ local workflow_env = utils.generateWorkflowEnv('analyzer', global_config);
           },
           run: |||
             python scripts/ai_analyzer.py \
-              --site "${{ github.event.inputs.site_id }}" \
+              --site ${{ github.event.inputs.site_id }} \
               --date "${{ github.event.inputs.data_date }}" \
-              --input "${{ github.event.inputs.data_file }}" \
-              --output "analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json" \
-              --prompt-template "%(prompt_template)s" \
-              --provider "%(ai_provider)s"
+              --input ${{ github.event.inputs.data_file }} \
+              --output analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json \
+              --prompt-template %(prompt_template)s \
+              --provider %(ai_provider)s
           ||| % {
             prompt_template: prompt_template,
             ai_provider: ai_provider
@@ -108,7 +108,8 @@ local workflow_env = utils.generateWorkflowEnv('analyzer', global_config);
           with: {
             name: '${{ github.event.inputs.site_id }}-analysis-${{ github.event.inputs.data_date }}',
             path: 'analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json',
-            'retention-days': 7
+            'retention-days': 7,
+            'if-no-files-found': 'warn'
           }
         },
         utils.generateGitCommitStep(

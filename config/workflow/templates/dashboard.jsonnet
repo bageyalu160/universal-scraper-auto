@@ -76,9 +76,9 @@ local workflow_env = utils.generateWorkflowEnv('dashboard', global_config);
           run: |||
             python scripts/dashboard_generator.py \
               --date "${{ steps.set-date.outputs.date }}" \
-              --data-dir "data" \
-              --analysis-dir "analysis" \
-              --output-dir "dashboard"
+              --data-dir data \
+              --analysis-dir analysis \
+              --output-dir dashboard
           |||
         },
         {

@@ -1,5 +1,5 @@
-name: PM001 ("pm001") 数据分析
-run-name: '🧠 PM001 ("pm001") 数据分析 #${{ github.run_number }} (${{ github.actor }})'
+name: PM001 (pm001) 数据分析
+run-name: '🧠 PM001 (pm001) 数据分析 #${{ github.run_number }} (${{ github.actor }})'
 on:
   workflow_dispatch:
     inputs:
@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       site_id:
-        default: '"pm001"'
+        default: pm001
         description: 站点ID
         required: true
         type: string
@@ -47,17 +47,17 @@ jobs:
         name: 缓存依赖和数据
         uses: actions/cache@v3
         with:
-          key: analyzer-deps-"pm001"-openai-${{ hashFiles('**/requirements.txt, config/sites/"pm001".yaml')
+          key: analyzer-deps-pm001-openai-${{ hashFiles('**/requirements.txt, config/sites/pm001.yaml')
             }}
-          path: "~/.cache/pip\nanalysis/\"pm001\"/cache"
-          restore-keys: analyzer-deps-"pm001"-openai-
+          path: "~/.cache/pip\nanalysis/pm001/cache"
+          restore-keys: analyzer-deps-pm001-openai-
       - name: 安装依赖
         run: pip install pandas>=2.0.3 openai>=1.0.0 google-generativeai>=0.3.1 numpy>=1.22.0
           openai>=1.0.0
       - name: 创建必要目录
         run: |-
-          mkdir -p analysis/"pm001"
-          mkdir -p analysis/"pm001"/cache
+          mkdir -p analysis/pm001
+          mkdir -p analysis/pm001/cache
       - env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -65,15 +65,16 @@ jobs:
         name: 运行分析
         run: |
           python scripts/ai_analyzer.py \
-            --site "${{ github.event.inputs.site_id }}" \
+            --site ${{ github.event.inputs.site_id }} \
             --date "${{ github.event.inputs.data_date }}" \
-            --input "${{ github.event.inputs.data_file }}" \
-            --output "analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json" \
-            --prompt-template "default" \
-            --provider "openai"
+            --input ${{ github.event.inputs.data_file }} \
+            --output analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json \
+            --prompt-template default \
+            --provider openai
       - name: 上传分析结果
         uses: actions/upload-artifact@v4
         with:
+          if-no-files-found: warn
           name: ${{ github.event.inputs.site_id }}-analysis-${{ github.event.inputs.data_date
             }}
           path: analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id

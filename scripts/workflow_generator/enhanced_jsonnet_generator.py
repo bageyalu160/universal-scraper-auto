@@ -755,7 +755,15 @@ else
         
         try:
             # 将外部变量转换为JSON字符串
-            json_vars = {k: json.dumps(v) for k, v in ext_vars.items()}
+            json_vars = {}
+            for k, v in ext_vars.items():
+                if k == 'site_id' and isinstance(v, str):
+                    # 直接传递站点ID，不使用json.dumps
+                    json_vars[k] = v
+                else:
+                    json_vars[k] = json.dumps(v)
+            
+            self.logger.debug(f"处理后的外部变量: {json_vars}")
             
             # 使用_jsonnet库渲染模板
             result = _jsonnet.evaluate_file(

@@ -373,7 +373,17 @@ class JsonnetWorkflowGenerator:
             # 准备外部变量
             ext_vars = ext_vars or {}
             self.logger.debug(f"外部变量: {', '.join(ext_vars.keys())}")
-            ext_vars_json = {k: json.dumps(v) for k, v in ext_vars.items()}
+            
+            # 特殊处理 site_id，避免添加额外的引号
+            ext_vars_json = {}
+            for k, v in ext_vars.items():
+                if k == 'site_id' and isinstance(v, str):
+                    # 直接传递站点ID，不使用json.dumps
+                    ext_vars_json[k] = v
+                else:
+                    ext_vars_json[k] = json.dumps(v)
+            
+            self.logger.debug(f"处理后的外部变量: {ext_vars_json}")
             
             # 渲染Jsonnet模板
             self.logger.debug(f"开始渲染 Jsonnet 模板: {template_name}")
