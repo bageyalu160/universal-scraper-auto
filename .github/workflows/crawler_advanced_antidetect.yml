@@ -1,6 +1,6 @@
-name: '"advanced_antidetect" 爬虫'
-run-name: '🕷️ "advanced_antidetect" 爬虫 #${{ github.run_number }} (${{ github.actor
-  }})'
+name: '"advanced_antidetect" ("advanced_antidetect") 爬虫'
+run-name: '🕷️ "advanced_antidetect" ("advanced_antidetect") 爬虫 #${{ github.run_number
+  }} (${{ github.actor }})'
 on:
   schedule:
     - cron: 0 0 * * *

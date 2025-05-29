@@ -64,8 +64,8 @@ else
   [];
 
 {
-  name: site_name + ' 爬虫',
-  'run-name': '🕷️ ' + site_name + ' 爬虫 #${{ github.run_number }} (${{ github.actor }})',
+  name: site_name + ' (' + site_id + ') 爬虫',
+  'run-name': '🕷️ ' + site_name + ' (' + site_id + ') 爬虫 #${{ github.run_number }} (${{ github.actor }})',
   
   // 定义工作流的权限
   permissions: {

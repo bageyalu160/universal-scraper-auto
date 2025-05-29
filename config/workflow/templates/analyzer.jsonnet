@@ -36,8 +36,8 @@ local prompt_template = utils.getConfigValue(analysis_config, 'prompt_template',
 local workflow_env = utils.generateWorkflowEnv('analyzer', global_config);
 
 {
-  name: site_name + ' 数据分析',
-  'run-name': '🧠 ' + site_name + ' 数据分析 #${{ github.run_number }} (${{ github.actor }})',
+  name: site_name + ' (' + site_id + ') 数据分析',
+  'run-name': '🧠 ' + site_name + ' (' + site_id + ') 数据分析 #${{ github.run_number }} (${{ github.actor }})',
   
   // 定义工作流的权限
   permissions: {

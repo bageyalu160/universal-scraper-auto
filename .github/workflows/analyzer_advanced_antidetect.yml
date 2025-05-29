@@ -1,6 +1,6 @@
-name: '"advanced_antidetect" 数据分析'
-run-name: '🧠 "advanced_antidetect" 数据分析 #${{ github.run_number }} (${{ github.actor
-  }})'
+name: '"advanced_antidetect" ("advanced_antidetect") 数据分析'
+run-name: '🧠 "advanced_antidetect" ("advanced_antidetect") 数据分析 #${{ github.run_number
+  }} (${{ github.actor }})'
 on:
   workflow_dispatch:
     inputs:
