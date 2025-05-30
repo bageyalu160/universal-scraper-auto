@@ -164,33 +164,14 @@ local workflow_env = utils.generateWorkflowEnv('master', global_config);
     crawl: {
       name: '爬取数据',
       needs: ['setup', 'update_proxy_pool'],
-      'if': "always() && (github.event.inputs.action == 'crawl_all' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule') && (needs.update_proxy_pool.result == 'success' || needs.update_proxy_pool.result == 'skipped')",
+      'if': "always() && (github.event.inputs.action == 'crawl_all' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule')",
       'runs-on': params.runtime.runner,
-      strategy: {
-        matrix: {
-          site_id: '${{ fromJSON(needs.setup.outputs.sites) }}'
-        },
-        'fail-fast': master_error_strategy['fail-fast']
+      outputs: {
+        status: '${{ steps.crawl_summary.outputs.status }}',
+        success_count: '${{ steps.crawl_summary.outputs.success_count }}',
+        failed_count: '${{ steps.crawl_summary.outputs.failed_count }}',
+        failed_sites: '${{ steps.crawl_summary.outputs.failed_sites }}'
       },
-      steps: [
-        {
-          name: '触发爬虫工作流',
-          uses: 'benc-uk/workflow-dispatch@v1',
-          with: {
-            workflow: 'crawler_${{ matrix.site_id }}.yml',
-            token: '${{ secrets.GITHUB_TOKEN }}',
-            inputs: '{"date": "${{ needs.setup.outputs.date }}"}'
-          }
-        }
-      ]
-    },
-    
-    // 分析数据任务
-    analyze: {
-      name: '分析数据',
-      needs: ['setup', 'crawl'],
-      'if': "always() && (github.event.inputs.action == 'analyze_all' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule') && (needs.crawl.result == 'success' || needs.crawl.result == 'skipped')",
-      'runs-on': params.runtime.runner,
       strategy: {
         matrix: {
           site_id: '${{ fromJSON(needs.setup.outputs.sites) }}'
@@ -199,6 +180,90 @@ local workflow_env = utils.generateWorkflowEnv('master', global_config);
       },
       steps: [
         utils.generateCheckoutStep(),
+        utils.generateDirectorySetupStep(['status/workflow']),
+        {
+          name: '触发爬虫工作流',
+          id: 'trigger_crawler',
+          uses: 'benc-uk/workflow-dispatch@v1',
+          with: {
+            workflow: 'crawler_${{ matrix.site_id }}.yml',
+            token: '${{ secrets.GITHUB_TOKEN }}',
+            inputs: '{"date": "${{ needs.setup.outputs.date }}", "parent_workflow_id": "${{ github.run_id }}"}'
+          }
+        },
+        // 初始化工作流状态
+        {
+          name: '初始化工作流状态',
+          run: |||
+            # 创建初始状态文件
+            mkdir -p status/workflow
+            cat > status/workflow/crawler_${{ matrix.site_id }}.json << EOF
+            {
+              "workflow_id": "${{ steps.trigger_crawler.outputs.workflow_id }}",
+              "parent_workflow_id": "${{ github.run_id }}",
+              "workflow_type": "crawler",
+              "site_id": "${{ matrix.site_id }}",
+              "status": "running",
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "data_date": "${{ needs.setup.outputs.date }}",
+              "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.trigger_crawler.outputs.workflow_id }}"
+            }
+            EOF
+          |||
+        },
+        // 检查爬虫工作流状态
+        utils.generateWorkflowStatusCheckStep('crawler', '${{ matrix.site_id }}', 300),
+        // 处理爬虫结果
+        {
+          name: '处理爬虫结果',
+          if: "always()",
+          run: |||
+            STATUS="${{ steps.check_crawler_${{ matrix.site_id }}_status.outputs.status || 'unknown' }}"
+            echo "爬虫工作流状态: $STATUS"
+            
+            if [ "$STATUS" != "success" ]; then
+              echo "::warning::爬虫工作流执行失败或超时，站点: ${{ matrix.site_id }}"
+            fi
+          |||
+        },
+        // 汇总爬虫结果
+        {
+          name: '汇总爬虫结果',
+          id: 'crawl_summary',
+          if: "always()",
+          run: |||
+            # 记录每个站点的状态
+            mkdir -p status/workflow
+            
+            # 写入当前状态
+            echo "site_id=${{ matrix.site_id }}" >> $GITHUB_OUTPUT
+            echo "status=${{ steps.check_crawler_${{ matrix.site_id }}_status.outputs.status || 'unknown' }}" >> $GITHUB_OUTPUT
+          |||
+        }
+      ]
+    },
+    
+    // 分析数据任务
+    analyze: {
+      name: '分析数据',
+      needs: ['setup', 'crawl'],
+      'if': "always() && (github.event.inputs.action == 'analyze_all' || github.event.inputs.action == 'full_pipeline' || github.event_name == 'schedule')",
+      'runs-on': params.runtime.runner,
+      outputs: {
+        status: '${{ steps.analyze_summary.outputs.status }}',
+        success_count: '${{ steps.analyze_summary.outputs.success_count }}',
+        failed_count: '${{ steps.analyze_summary.outputs.failed_count }}',
+        failed_sites: '${{ steps.analyze_summary.outputs.failed_sites }}'
+      },
+      strategy: {
+        matrix: {
+          site_id: '${{ fromJSON(needs.setup.outputs.sites) }}'
+        },
+        'fail-fast': master_error_strategy['fail-fast']
+      },
+      steps: [
+        utils.generateCheckoutStep(),
+        utils.generateDirectorySetupStep(['status/workflow']),
         {
           name: '获取最新数据文件',
           id: 'get-latest-file',
@@ -209,28 +274,22 @@ local workflow_env = utils.generateWorkflowEnv('master', global_config);
             
             echo "=== 数据文件查找 ==="
             echo "站点ID: $SITE_ID"
-            echo "数据日期: $DATE"
-            echo "数据目录: $DATA_DIR"
+            echo "日期: $DATE"
+            echo "目录: $DATA_DIR"
             
+            # 检查指定日期目录下的数据文件
             if [ -d "$DATA_DIR" ]; then
-              # 查找匹配的数据文件
-              DATA_FILE=$(find $DATA_DIR -name "${SITE_ID}*.json" -type f | sort | tail -1)
+              DATA_FILE=$(find "$DATA_DIR" -name "${SITE_ID}_*.json" -o -name "${SITE_ID}_*.csv" -o -name "${SITE_ID}_*.tsv" | head -1)
               
-              if [ -n "$DATA_FILE" ]; then
+              if [ -n "$DATA_FILE" ] && [ -f "$DATA_FILE" ]; then
+                echo "找到数据文件: $DATA_FILE"
                 echo "data_file=$DATA_FILE" >> $GITHUB_OUTPUT
-                echo "found=true" >> $GITHUB_OUTPUT
-                echo "✅ 找到数据文件: $DATA_FILE"
               else
+                echo "在 $DATA_DIR 中未找到 ${SITE_ID} 的数据文件"
                 echo "data_file=" >> $GITHUB_OUTPUT
-                echo "found=false" >> $GITHUB_OUTPUT
-                echo "⚠️ 未找到匹配的数据文件"
-                echo "尝试查找所有文件:"
-                find $DATA_DIR -type f | head -5
               fi
             else
-              echo "data_file=" >> $GITHUB_OUTPUT
-              echo "found=false" >> $GITHUB_OUTPUT
-              echo "⚠️ 数据目录不存在: $DATA_DIR"
+              echo "$DATA_DIR 目录不存在"
               echo "可用的数据目录:"
               if [ -d "data/daily" ]; then
                 ls -1 data/daily/ | tail -3
@@ -242,6 +301,7 @@ local workflow_env = utils.generateWorkflowEnv('master', global_config);
         },
         {
           name: '触发分析工作流',
+          id: 'trigger_analyzer',
           'if': "steps.get-latest-file.outputs.data_file != ''",
           uses: 'benc-uk/workflow-dispatch@v1',
           with: {
@@ -251,10 +311,88 @@ local workflow_env = utils.generateWorkflowEnv('master', global_config);
               {
                 "data_date": "${{ needs.setup.outputs.date }}",
                 "data_file": "${{ steps.get-latest-file.outputs.data_file }}",
-                "site_id": "${{ matrix.site_id }}"
+                "site_id": "${{ matrix.site_id }}",
+                "parent_workflow_id": "${{ github.run_id }}"
               }
             |||
           }
+        },
+        // 初始化工作流状态
+        {
+          name: '初始化分析工作流状态',
+          if: "steps.get-latest-file.outputs.data_file != ''",
+          run: |||
+            # 创建初始状态文件
+            mkdir -p status/workflow
+            cat > status/workflow/analyzer_${{ matrix.site_id }}.json << EOF
+            {
+              "workflow_id": "${{ steps.trigger_analyzer.outputs.workflow_id || '' }}",
+              "parent_workflow_id": "${{ github.run_id }}",
+              "workflow_type": "analyzer",
+              "site_id": "${{ matrix.site_id }}",
+              "status": "running",
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "data_date": "${{ needs.setup.outputs.date }}",
+              "data_file": "${{ steps.get-latest-file.outputs.data_file }}",
+              "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.trigger_analyzer.outputs.workflow_id || '' }}"
+            }
+            EOF
+          |||
+        },
+        // 记录没有数据文件的情况
+        {
+          name: '记录无数据文件状态',
+          if: "steps.get-latest-file.outputs.data_file == ''",
+          run: |||
+            # 创建状态文件
+            mkdir -p status/workflow
+            cat > status/workflow/analyzer_${{ matrix.site_id }}.json << EOF
+            {
+              "workflow_id": "none",
+              "parent_workflow_id": "${{ github.run_id }}",
+              "workflow_type": "analyzer",
+              "site_id": "${{ matrix.site_id }}",
+              "status": "skipped",
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "data_date": "${{ needs.setup.outputs.date }}",
+              "message": "无数据文件可分析"
+            }
+            EOF
+          |||
+        },
+        // 检查分析器工作流状态
+        utils.generateWorkflowStatusCheckStep('analyzer', '${{ matrix.site_id }}', 600),
+        // 处理分析器结果
+        {
+          name: '处理分析器结果',
+          if: "steps.get-latest-file.outputs.data_file != ''",
+          run: |||
+            STATUS="${{ steps.check_analyzer_${{ matrix.site_id }}_status.outputs.status || 'unknown' }}"
+            echo "分析器工作流状态: $STATUS"
+            
+            if [ "$STATUS" != "success" ]; then
+              echo "::warning::分析器工作流执行失败或超时，站点: ${{ matrix.site_id }}"
+            fi
+          |||
+        },
+        // 汇总分析器结果
+        {
+          name: '汇总分析器结果',
+          id: 'analyze_summary',
+          if: "always()",
+          run: |||
+            # 记录每个站点的状态
+            mkdir -p status/workflow
+            
+            # 写入当前状态
+            echo "site_id=${{ matrix.site_id }}" >> $GITHUB_OUTPUT
+            
+            if [ "${{ steps.get-latest-file.outputs.data_file }}" == "" ]; then
+              echo "status=skipped" >> $GITHUB_OUTPUT
+            else
+              echo "status=${{ steps.check_analyzer_${{ matrix.site_id }}_status.outputs.status || 'unknown' }}" >> $GITHUB_OUTPUT
+            fi
+          |||
         }
       ]
     },
@@ -270,7 +408,7 @@ local workflow_env = utils.generateWorkflowEnv('master', global_config);
           name: '触发仪表盘更新工作流',
           uses: 'benc-uk/workflow-dispatch@v1',
           with: {
-            workflow: 'dashboard.yml',
+            workflow: 'update_dashboard.yml',
             token: '${{ secrets.GITHUB_TOKEN }}',
             inputs: '{"date": "${{ needs.setup.outputs.date }}"}'
           }
@@ -290,12 +428,89 @@ local workflow_env = utils.generateWorkflowEnv('master', global_config);
         utils.generateDirectorySetupStep(['status/workflow']),
         {
           name: '生成执行摘要',
+          id: 'workflow_summary',
           run: |||
             echo "=== 🚀 主工作流执行摘要 ==="
             echo "执行日期: ${{ needs.setup.outputs.date }}"
             echo "触发方式: ${{ github.event_name }}"
             echo "操作类型: ${{ github.event.inputs.action || '定时任务' }}"
             echo "处理站点: ${{ needs.setup.outputs.sites }}"
+            echo ""
+            
+            # 统计子工作流状态
+            echo "=== 📊 子工作流状态统计 ==="
+            
+            # 爬虫工作流统计
+            CRAWLER_SUCCESS=0
+            CRAWLER_FAILED=0
+            CRAWLER_SKIPPED=0
+            CRAWLER_UNKNOWN=0
+            CRAWLER_FAILED_SITES=""
+            
+            # 分析器工作流统计
+            ANALYZER_SUCCESS=0
+            ANALYZER_FAILED=0
+            ANALYZER_SKIPPED=0
+            ANALYZER_UNKNOWN=0
+            ANALYZER_FAILED_SITES=""
+            
+            # 遍历状态文件目录
+            for STATUS_FILE in status/workflow/crawler_*.json; do
+              if [ -f "$STATUS_FILE" ]; then
+                SITE_ID=$(basename "$STATUS_FILE" | sed 's/crawler_\(.*\)\.json/\1/')
+                STATUS=$(jq -r '.status' "$STATUS_FILE")
+                
+                case "$STATUS" in
+                  "success")
+                    CRAWLER_SUCCESS=$((CRAWLER_SUCCESS + 1))
+                    ;;
+                  "failed")
+                    CRAWLER_FAILED=$((CRAWLER_FAILED + 1))
+                    CRAWLER_FAILED_SITES="$CRAWLER_FAILED_SITES $SITE_ID"
+                    ;;
+                  "skipped")
+                    CRAWLER_SKIPPED=$((CRAWLER_SKIPPED + 1))
+                    ;;
+                  *)
+                    CRAWLER_UNKNOWN=$((CRAWLER_UNKNOWN + 1))
+                    ;;
+                esac
+              fi
+            done
+            
+            for STATUS_FILE in status/workflow/analyzer_*.json; do
+              if [ -f "$STATUS_FILE" ]; then
+                SITE_ID=$(basename "$STATUS_FILE" | sed 's/analyzer_\(.*\)\.json/\1/')
+                STATUS=$(jq -r '.status' "$STATUS_FILE")
+                
+                case "$STATUS" in
+                  "success")
+                    ANALYZER_SUCCESS=$((ANALYZER_SUCCESS + 1))
+                    ;;
+                  "failed")
+                    ANALYZER_FAILED=$((ANALYZER_FAILED + 1))
+                    ANALYZER_FAILED_SITES="$ANALYZER_FAILED_SITES $SITE_ID"
+                    ;;
+                  "skipped")
+                    ANALYZER_SKIPPED=$((ANALYZER_SKIPPED + 1))
+                    ;;
+                  *)
+                    ANALYZER_UNKNOWN=$((ANALYZER_UNKNOWN + 1))
+                    ;;
+                esac
+              fi
+            done
+            
+            echo "爬虫工作流: 成功=$CRAWLER_SUCCESS, 失败=$CRAWLER_FAILED, 跳过=$CRAWLER_SKIPPED, 未知=$CRAWLER_UNKNOWN"
+            if [ -n "$CRAWLER_FAILED_SITES" ]; then
+              echo "爬虫失败站点:$CRAWLER_FAILED_SITES"
+            fi
+            
+            echo "分析工作流: 成功=$ANALYZER_SUCCESS, 失败=$ANALYZER_FAILED, 跳过=$ANALYZER_SKIPPED, 未知=$ANALYZER_UNKNOWN"
+            if [ -n "$ANALYZER_FAILED_SITES" ]; then
+              echo "分析失败站点:$ANALYZER_FAILED_SITES"
+            fi
+            
             echo ""
             echo "=== 📊 各步骤执行结果 ==="
             echo "1️⃣ 环境准备: ${{ needs.setup.result }}"
@@ -328,16 +543,61 @@ local workflow_env = utils.generateWorkflowEnv('master', global_config);
                 "analyze": "${{ needs.analyze.result }}",
                 "dashboard": "${{ needs.update_dashboard.result }}"
               },
+              "crawler_stats": {
+                "success": $CRAWLER_SUCCESS,
+                "failed": $CRAWLER_FAILED,
+                "skipped": $CRAWLER_SKIPPED,
+                "unknown": $CRAWLER_UNKNOWN,
+                "failed_sites": "$CRAWLER_FAILED_SITES"
+              },
+              "analyzer_stats": {
+                "success": $ANALYZER_SUCCESS,
+                "failed": $ANALYZER_FAILED,
+                "skipped": $ANALYZER_SKIPPED,
+                "unknown": $ANALYZER_UNKNOWN,
+                "failed_sites": "$ANALYZER_FAILED_SITES"
+              },
               "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             }
             EOF
+            
+            # 输出到 GITHUB_OUTPUT
+            echo "crawler_success=$CRAWLER_SUCCESS" >> $GITHUB_OUTPUT
+            echo "crawler_failed=$CRAWLER_FAILED" >> $GITHUB_OUTPUT
+            echo "crawler_skipped=$CRAWLER_SKIPPED" >> $GITHUB_OUTPUT
+            echo "crawler_failed_sites=$CRAWLER_FAILED_SITES" >> $GITHUB_OUTPUT
+            
+            echo "analyzer_success=$ANALYZER_SUCCESS" >> $GITHUB_OUTPUT
+            echo "analyzer_failed=$ANALYZER_FAILED" >> $GITHUB_OUTPUT
+            echo "analyzer_skipped=$ANALYZER_SKIPPED" >> $GITHUB_OUTPUT
+            echo "analyzer_failed_sites=$ANALYZER_FAILED_SITES" >> $GITHUB_OUTPUT
+            
             echo "✅ 执行摘要已保存到 status/workflow/master_workflow_summary.json"
           |||
         },
-        utils.generateGitCommitStep(
-          ["status/workflow/"],
-          "📊 自动更新: 主工作流执行摘要 (${{ needs.setup.outputs.date }})"
-        )
+        {
+          name: '配置Git并提交工作流摘要',
+          run: |
+            # 配置Git
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            # 添加文件
+            git add status/workflow/
+
+            # 拉取远程更改，避免推送冲突
+            git pull --rebase origin main || echo "拉取远程仓库失败，尝试继续提交"
+
+            # 提交更改
+            if git diff --staged --quiet; then
+              echo "没有变更需要提交"
+            else
+              git commit -m "📊 自动更新: 主工作流执行摘要 (${{ needs.setup.outputs.date }})"
+              git push
+              echo "✅ 成功提交并推送工作流摘要"
+            fi
+          |||
+        }
       ]
     },
     
@@ -379,14 +639,72 @@ local workflow_env = utils.generateWorkflowEnv('master', global_config);
                 "sites": ${{ needs.setup.outputs.sites }},
                 "action": "${{ github.event.inputs.action || '定时任务' }}",
                 "run_id": "${{ github.run_id }}",
-                "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+                "crawler_stats": {
+                  "success": "${{ needs.workflow_summary.outputs.crawler_success || '0' }}",
+                  "failed": "${{ needs.workflow_summary.outputs.crawler_failed || '0' }}",
+                  "skipped": "${{ needs.workflow_summary.outputs.crawler_skipped || '0' }}",
+                  "failed_sites": "${{ needs.workflow_summary.outputs.crawler_failed_sites || '' }}"
+                },
+                "analyzer_stats": {
+                  "success": "${{ needs.workflow_summary.outputs.analyzer_success || '0' }}",
+                  "failed": "${{ needs.workflow_summary.outputs.analyzer_failed || '0' }}",
+                  "skipped": "${{ needs.workflow_summary.outputs.analyzer_skipped || '0' }}",
+                  "failed_sites": "${{ needs.workflow_summary.outputs.analyzer_failed_sites || '' }}"
+                }
               }
             }
             EOF
             
+            # 准备通知内容
+            TITLE="📢 Universal Scraper 工作流执行报告"
+            DATE="${{ needs.setup.outputs.date }}"
+            RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            
+            # 汇总数据
+            CRAWLER_SUCCESS="${{ needs.workflow_summary.outputs.crawler_success || '0' }}"
+            CRAWLER_FAILED="${{ needs.workflow_summary.outputs.crawler_failed || '0' }}"
+            CRAWLER_SKIPPED="${{ needs.workflow_summary.outputs.crawler_skipped || '0' }}"
+            CRAWLER_FAILED_SITES="${{ needs.workflow_summary.outputs.crawler_failed_sites || '' }}"
+            
+            ANALYZER_SUCCESS="${{ needs.workflow_summary.outputs.analyzer_success || '0' }}"
+            ANALYZER_FAILED="${{ needs.workflow_summary.outputs.analyzer_failed || '0' }}"
+            ANALYZER_SKIPPED="${{ needs.workflow_summary.outputs.analyzer_skipped || '0' }}"
+            ANALYZER_FAILED_SITES="${{ needs.workflow_summary.outputs.analyzer_failed_sites || '' }}"
+            
+            # 生成通知内容
+            cat > temp-notification/notification_content.md << EOF
+            ### $TITLE
+            
+            **数据日期:** $DATE
+            
+            **爬虫结果:**
+            - 成功: $CRAWLER_SUCCESS
+            - 失败: $CRAWLER_FAILED
+            - 跳过: $CRAWLER_SKIPPED
+            EOF
+            
+            if [ -n "$CRAWLER_FAILED_SITES" ]; then
+              echo "- 失败站点:$CRAWLER_FAILED_SITES" >> temp-notification/notification_content.md
+            fi
+            
+            cat >> temp-notification/notification_content.md << EOF
+            
+            **分析结果:**
+            - 成功: $ANALYZER_SUCCESS
+            - 失败: $ANALYZER_FAILED
+            - 跳过: $ANALYZER_SKIPPED
+            EOF
+            
+            if [ -n "$ANALYZER_FAILED_SITES" ]; then
+              echo "- 失败站点:$ANALYZER_FAILED_SITES" >> temp-notification/notification_content.md
+            fi
+            
+            echo -e "\n[查看工作流详情]($RUN_URL)" >> temp-notification/notification_content.md
+            
             # 发送通知
             echo "📢 发送主工作流完成通知..."
-            python scripts/notify.py --file "temp-notification/master_workflow_status.json" --site "主工作流"
+            python scripts/notify.py --file "temp-notification/master_workflow_status.json" --site "主工作流" --content "$(cat temp-notification/notification_content.md)"
           |||
         }
       ]

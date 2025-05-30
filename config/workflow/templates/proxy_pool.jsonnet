@@ -43,16 +43,21 @@ local min_proxy_threshold = utils.getConfigValue(proxy_config, 'min_threshold', 
   
   on: utils.generateWorkflowDispatchTrigger({
     action: {
-      description: '执行操作',
+      description: '操作类型',
       required: true,
       type: 'choice',
-      options: [
-        'update',
-        'validate',
-        'clean',
-        'rebuild'
-      ],
-      default: 'update'
+      options: ['update', 'verify', 'full']
+    },
+    parent_workflow_id: {
+      description: '父工作流ID(由主工作流触发时使用)',
+      required: false,
+      type: 'string'
+    },
+    retry: {
+      description: '是否为重试执行',
+      required: false,
+      type: 'boolean',
+      default: false
     },
     pool_size: {
       description: '代理池大小 (仅适用于更新操作)',
@@ -358,10 +363,32 @@ local min_proxy_threshold = utils.getConfigValue(proxy_config, 'min_threshold', 
             'if-no-files-found': 'warn'
           }
         },
-        utils.generateGitCommitStep(
-          ["data/proxies/proxy_pool.json", "status/proxies/pool_status.json"],
-          "🤖 自动更新: 代理池管理 (动作: ${{ needs.pre-check.outputs.action }}, 有效代理: ${{ steps.final_status.outputs.final_valid_count }})"
-        )
+        {
+          name: '配置Git并提交代理池更新',
+          run: |
+            # 配置Git
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            # 添加文件
+            git add data/proxies/proxy_pool.json
+            git add status/proxies/pool_status.json
+
+            # 拉取远程更改，避免推送冲突
+            git pull --rebase origin main || echo "拉取远程仓库失败，尝试继续提交"
+
+            # 提交更改
+            if git diff --staged --quiet; then
+              echo "没有变更需要提交"
+            else
+              git commit -m "🤖 自动更新: 代理池管理 (动作: ${{ needs.pre-check.outputs.action }}, 有效代理: ${{ steps.final_status.outputs.final_valid_count }})"
+              git push
+              echo "✅ 成功提交并推送代理池更新"
+            fi
+          |||
+        },
+        // 添加工作流状态报告
+        utils.generateWorkflowStatusStep('proxy_pool', 'proxy_pool')
       ]
     },
     

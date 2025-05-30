@@ -301,24 +301,27 @@
   
   // 生成Git提交步骤
   generateGitCommitStep(paths_to_add, commit_message)::  
-    local paths_array = if std.isArray(paths_to_add) then paths_to_add else [paths_to_add];
+    local paths_array = if std.type(paths_to_add) == 'array' then paths_to_add else [paths_to_add];
     {
       name: '提交更改',
       run: |||
         # 配置Git
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        
+
         # 添加文件
         %(add_commands)s
-        
+
+        # 拉取远程更改，避免推送冲突
+        git pull --rebase origin main || echo "拉取远程仓库失败，尝试继续提交"
+
         # 提交更改
         if git diff --staged --quiet; then
           echo "没有变更需要提交"
         else
           git commit -m "%(commit_message)s"
           git push
-          echo "✅ 成功提交更改"
+          echo "✅ 成功提交并推送更改"
         fi
       ||| % {
         add_commands: std.join('\n', ['git add ' + std.strReplace(path, '"', '') for path in paths_array]),
@@ -646,6 +649,98 @@
     ]
   },
   
+  // 生成工作流状态报告步骤
+  generateWorkflowStatusStep(workflow_type, site_id, parent_param='parent_workflow_id'):: {
+    name: '报告工作流状态',
+    'if': 'always()',
+    run: |||
+      # 创建状态目录
+      mkdir -p status/workflow
+      
+      # 生成状态文件
+      cat > status/workflow/%(workflow_type)s_%(site_id)s.json << EOF
+      {
+        "workflow_id": "${{ github.run_id }}",
+        "parent_workflow_id": "${{ github.event.inputs.%(parent_param)s || '' }}",
+        "workflow_type": "%(workflow_type)s",
+        "site_id": "%(site_id)s",
+        "status": "${{ job.status }}",
+        "timestamp": "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)",
+        "data_date": "${{ needs.pre-check.outputs.run_date }}",
+        "artifacts": [
+          "%(site_id)s-data-${{ needs.pre-check.outputs.run_date }}",
+          "%(site_id)s-status-${{ needs.pre-check.outputs.run_date }}"
+        ],
+        "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      }
+      EOF
+      
+      # 如果是由主工作流触发的，则推送状态
+      if [ -n "${{ github.event.inputs.%(parent_param)s }}" ]; then
+        # 配置Git
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        
+        # 添加状态文件
+        git add status/workflow/%(workflow_type)s_%(site_id)s.json
+        
+        # 拉取远程更改，避免推送冲突
+        git pull --rebase origin main || echo "拉取远程仓库失败，尝试继续提交"
+        
+        # 提交更改
+        if ! git diff --staged --quiet; then
+          git commit -m "📊 工作流状态更新: %(workflow_type)s_%(site_id)s (${{ needs.pre-check.outputs.run_date }})"
+          git push
+        fi
+      fi
+    ||| % {
+      workflow_type: workflow_type,
+      site_id: site_id,
+      parent_param: parent_param
+    }
+  },
+
+  // 生成子工作流状态检查步骤
+  generateWorkflowStatusCheckStep(workflow_type, site_id, max_wait=600):: {
+    name: '检查子工作流状态',
+    id: 'check_' + workflow_type + '_' + site_id + '_status',
+    run: |||
+      # 等待子工作流完成(最多等待指定时间)
+      MAX_WAIT=%(max_wait)d
+      WAIT_INTERVAL=30
+      ELAPSED=0
+      
+      echo "等待子工作流 %(workflow_type)s_%(site_id)s 完成..."
+      
+      while [ $ELAPSED -lt $MAX_WAIT ]; do
+        # 检查状态文件是否存在
+        if [ -f "status/workflow/%(workflow_type)s_%(site_id)s.json" ]; then
+          STATUS=$(jq -r '.status' status/workflow/%(workflow_type)s_%(site_id)s.json)
+          if [ "$STATUS" != "running" ]; then
+            echo "子工作流状态: $STATUS"
+            echo "status=$STATUS" >> $GITHUB_OUTPUT
+            break
+          fi
+        fi
+        
+        # 等待一段时间后再检查
+        sleep $WAIT_INTERVAL
+        ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+        echo "已等待 $ELAPSED 秒..."
+      done
+      
+      # 如果超时仍未完成，标记为超时
+      if [ $ELAPSED -ge $MAX_WAIT ]; then
+        echo "子工作流检查超时"
+        echo "status=timeout" >> $GITHUB_OUTPUT
+      fi
+    ||| % {
+      workflow_type: workflow_type,
+      site_id: site_id,
+      max_wait: max_wait
+    }
+  },
+
   // 构建通知作业
   buildNotifyJob(site_config, global_config):: {
     local site_id = std.extVar('site_id'),

@@ -139,26 +139,39 @@ jobs:
           fi
 
       # 新增步骤：检查代理池状态
-      - name: 检查代理池状态
+      - name: 创建代理池目录和检查状态
         id: check_proxy_pool
         if: env.USE_PROXY == 'true'
         run: |
+          # 确保代理池目录存在
+          mkdir -p data/proxies
+          mkdir -p status/proxies
+          
+          # 如果代理池文件不存在，创建一个空的初始文件
+          if [ ! -f "data/proxies/proxy_pool.json" ]; then
+            echo '{"proxies": []}' > data/proxies/proxy_pool.json
+            echo "创建了初始的代理池文件"
+          fi
+          
           if [ -f "status/proxies/pool_status.json" ]; then
             echo "代理池状态文件存在"
-            # 获取有效代理数量
-            valid_count=$(cat status/proxies/pool_status.json | jq '.valid_proxies | length')
-            echo "有效代理数量: $valid_count"
+            # 读取有效代理数量
+            valid_count=$(cat status/proxies/pool_status.json | grep -o '"valid_count":[0-9]\+' | cut -d ':' -f 2)
+            total_count=$(cat status/proxies/pool_status.json | grep -o '"total_count":[0-9]\+' | cut -d ':' -f 2)
+            echo "当前代理池状态: 总数 $total_count, 有效 $valid_count"
             
-            if [ "$valid_count" -lt "5" ]; then
-              echo "⚠️ 有效代理数量不足，尝试更新代理池"
+            # 判断是否需要更新
+            if [ -z "$valid_count" ] || [ "$valid_count" -lt 5 ]; then
+              echo "有效代理不足，需要更新"
+              echo "pool_exists=true" >> $GITHUB_OUTPUT
               echo "needs_update=true" >> $GITHUB_OUTPUT
             else
-              echo "✅ 代理池状态正常"
+              echo "代理池状态良好，无需更新"
+              echo "pool_exists=true" >> $GITHUB_OUTPUT
               echo "needs_update=false" >> $GITHUB_OUTPUT
             fi
-            echo "pool_exists=true" >> $GITHUB_OUTPUT
           else
-            echo "⚠️ 代理池状态文件不存在，需要初始化"
+            echo "代理池状态文件不存在，需要初始化"
             echo "pool_exists=false" >> $GITHUB_OUTPUT
             echo "needs_update=true" >> $GITHUB_OUTPUT
           fi
@@ -168,25 +181,29 @@ jobs:
         if: env.USE_PROXY == 'true' && steps.check_proxy_pool.outputs.needs_update == 'true'
         env:
           PROXY_API_KEY: {% raw %}${{ secrets.PROXY_API_KEY }}{% endraw %}
-          PROXY_SOURCE_URL: {% raw %}${{ secrets.PROXY_SOURCE_URL }}{% endraw %}
         run: |
-          echo "执行代理池更新..."
+          echo "开始更新代理池..."
           
-          if [ "{% raw %}${{ steps.check_proxy_pool.outputs.pool_exists }}{% endraw %}" == "true" ]; then
-            # 更新现有代理池
-            python scripts/proxy_manager.py --action update --source all
-          else
-            # 初始化代理池
-            python scripts/proxy_manager.py --action rebuild --source all
-          fi
+          # 尝试执行更新，如果失败则尝试恢复备份
+          python scripts/proxy_manager.py update --min-count 10 --timeout 10 || echo "代理更新脚本执行失败"
           
           # 检查更新结果
           if [ -f "status/proxies/pool_status.json" ]; then
-            valid_count=$(cat status/proxies/pool_status.json | jq '.valid_proxies | length')
-            echo "更新后有效代理: $valid_count 个"
+            valid_count=$(cat status/proxies/pool_status.json | grep -o '"valid_count":[0-9]\+' | cut -d ':' -f 2)
+            echo "更新后的有效代理数: $valid_count"
             
-            if [ "$valid_count" -eq "0" ]; then
+            if [ -n "$valid_count" ] && [ "$valid_count" -gt 0 ]; then
+              echo "✅ 代理池更新成功"
+              # 备份成功的代理池
+              cp data/proxies/proxy_pool.json data/proxies/proxy_pool_backup.json
+            else
               echo "⚠️ 警告：代理池更新后无可用代理"
+              # 如果有备份，尝试恢复
+              if [ -f "data/proxies/proxy_pool_backup.json" ]; then
+                echo "尝试恢复代理池备份..."
+                cp data/proxies/proxy_pool_backup.json data/proxies/proxy_pool.json
+                python scripts/proxy_manager.py validate --timeout 5 || echo "代理验证失败"
+              fi
             fi
           else
             echo "❌ 代理池更新失败，状态文件不存在"
@@ -316,6 +333,9 @@ jobs:
           git add {{ output_filename }} || echo "没有主数据文件"
           git add {{ status_dir }}/crawler_$SITE_ID.json
           
+          # 拉取远程更改，避免推送冲突
+          git pull --rebase origin main || echo "拉取远程仓库失败，尝试继续提交"
+          
           if git diff --staged --quiet; then
             echo "没有变更需要提交"
           else
@@ -339,6 +359,7 @@ jobs:
       - name: 触发分析工作流
         if: {% raw %}steps.run_scraper.outputs.file_exists == 'true'{% endraw %}
         uses: benc-uk/workflow-dispatch@v1
+        continue-on-error: true
         with:
           workflow: analyzer_{{ site_id }}.yml
           token: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
@@ -371,6 +392,14 @@ jobs:
           name: {{ site_id }}-data-${% raw %}{{ needs.pre-check.outputs.run_date }}{% endraw %}
           path: temp-crawler/
         continue-on-error: true
+        
+      - name: 触发仪表板更新
+        if: {% raw %}always(){% endraw %}
+        uses: benc-uk/workflow-dispatch@v1
+        continue-on-error: true
+        with:
+          workflow: update_dashboard.yml
+          token: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
       
       - name: 准备通知内容并发送
         env:

@@ -140,6 +140,9 @@ jobs:
           git add data/heimao/
           git add status/heimao/
 
+          # 拉取远程更改，避免推送冲突
+          git pull --rebase origin main || echo "拉取远程仓库失败，尝试继续提交"
+
           # 提交更改
           if git diff --staged --quiet; then
             echo "没有变更需要提交"
@@ -178,6 +181,12 @@ jobs:
           mkdir -p data/proxies
           mkdir -p status/proxies
           mkdir -p logs
+          
+          # 如果代理池文件不存在，创建一个空的初始文件
+          if [ ! -f "data/proxies/proxy_pool.json" ]; then
+            echo '{"proxies": []}' > data/proxies/proxy_pool.json
+            echo "创建了初始的代理池文件"
+          fi
       - id: check_proxy_pool
         name: 检查代理池状态
         run: |
@@ -209,28 +218,39 @@ jobs:
           echo "开始更新代理池..."
 
           # 尝试执行更新，如果失败则尝试恢复
-          python scripts/proxy_manager.py update --min-count 10 --timeout 10
+          python scripts/proxy_manager.py update --min-count 10 --timeout 10 || echo "代理更新脚本执行失败"
 
           # 检查更新后的状态
           if [ -f "status/proxies/pool_status.json" ]; then
-            valid_count=$(jq '.valid_count' status/proxies/pool_status.json)
+            valid_count=$(jq '.valid_count' status/proxies/pool_status.json 2>/dev/null || echo 0)
             echo "更新后的有效代理数: $valid_count"
             
             # 如果更新后代理仍然不足，尝试恢复备份
             if [ "$valid_count" -lt "5" ] && [ -f "data/proxies/proxy_pool_backup.json" ]; then
               echo "⚠️ 更新后代理仍然不足，尝试恢复备份..."
               cp data/proxies/proxy_pool_backup.json data/proxies/proxy_pool.json
-              python scripts/proxy_manager.py validate --timeout 5
+              python scripts/proxy_manager.py validate --timeout 5 || echo "代理验证失败"
               
               if [ -f "status/proxies/pool_status.json" ]; then
-                valid_count=$(jq '.valid_count' status/proxies/pool_status.json)
+                valid_count=$(jq '.valid_count' status/proxies/pool_status.json 2>/dev/null || echo 0)
                 echo "恢复备份后的有效代理数: $valid_count"
               fi
+            fi
+            
+            # 确保代理池文件存在
+            if [ ! -f "data/proxies/proxy_pool.json" ]; then
+              echo '{"proxies": []}' > data/proxies/proxy_pool.json
+              echo "创建了初始的代理池文件"
             fi
             
             echo "更新后的有效代理数: $valid_count"
           else
             echo "⚠️ 更新后仍未找到代理池状态文件"
+            # 确保代理池文件存在
+            if [ ! -f "data/proxies/proxy_pool.json" ]; then
+              echo '{"proxies": []}' > data/proxies/proxy_pool.json
+              echo "创建了初始的代理池文件"
+            fi
           fi
       - name: 提交更改
         run: |
@@ -241,6 +261,9 @@ jobs:
           # 添加文件
           git add data/proxies/
           git add status/proxies/
+
+          # 拉取远程更改，避免推送冲突
+          git pull --rebase origin main || echo "拉取远程仓库失败，尝试继续提交"
 
           # 提交更改
           if git diff --staged --quiet; then

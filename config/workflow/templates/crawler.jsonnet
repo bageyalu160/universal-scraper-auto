@@ -84,6 +84,17 @@ else
       required: false,
       type: 'boolean',
       default: use_proxy
+    },
+    parent_workflow_id: {
+      description: '父工作流ID(由主工作流触发时使用)',
+      required: false,
+      type: 'string'
+    },
+    retry: {
+      description: '是否为重试执行',
+      required: false,
+      type: 'boolean',
+      default: false
     }
   }) + utils.generateScheduleTrigger(schedule),
   
@@ -344,10 +355,32 @@ else
             'if-no-files-found': 'warn'
           }
         },
-        utils.generateGitCommitStep(
-          ["data/" + site_id + "/", "status/" + site_id + "/"],
-          "🤖 自动更新: " + site_name + "爬虫结果 ($RUN_DATE)"
-        )
+        {
+          name: '配置Git并提交更改',
+          run: |
+            # 配置Git
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            # 添加文件
+            git add data/%(site_id)s/
+            git add status/%(site_id)s/
+
+            # 拉取远程更改，避免推送冲突
+            git pull --rebase origin main || echo "拉取远程仓库失败，尝试继续提交"
+
+            # 提交更改
+            if git diff --staged --quiet; then
+              echo "没有变更需要提交"
+            else
+              git commit -m "🤖 自动更新: %(site_name)s爬虫结果 ($RUN_DATE)"
+              git push
+              echo "✅ 成功提交并推送爬虫结果"
+            fi
+          ||| % {site_id: site_id, site_name: site_name}
+        },
+        // 添加工作流状态报告
+        utils.generateWorkflowStatusStep('crawler', site_id)
       ]
     }
   }
