@@ -1,0 +1,72 @@
+  // 生成工作流执行指标收集步骤
+  generateMetricsCollectionStep(workflow_type, id)::
+    {
+      name: '收集执行指标',
+      id: 'metrics_collection',
+      if: "always()",
+      run: |||
+        # 创建指标目录
+        mkdir -p metrics/workflow
+        
+        # 记录执行时间
+        START_TIME="${{ steps.setup_start.outputs.start_time || github.event.repository.pushed_at }}"
+        END_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        
+        # 计算执行时间（秒）
+        START_SECONDS=$(date -d "$START_TIME" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$START_TIME" +%s 2>/dev/null || echo "0")
+        END_SECONDS=$(date -d "$END_TIME" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$END_TIME" +%s 2>/dev/null || echo "0")
+        
+        if [ "$START_SECONDS" != "0" ] && [ "$END_SECONDS" != "0" ]; then
+          DURATION=$((END_SECONDS - START_SECONDS))
+        else
+          DURATION=0
+        fi
+        
+        # 获取资源使用情况
+        MEMORY_USAGE=$(ps -o rss= -p $$ 2>/dev/null || echo "0")
+        MEMORY_USAGE=$((MEMORY_USAGE / 1024)) # 转换为MB
+        
+        # 创建指标文件
+        cat > metrics/workflow/%(workflow_type)s_%(id)s_$(date -u +%%Y%%m%%d).json << EOF
+        {
+          "workflow_type": "%(workflow_type)s",
+          "id": "%(id)s",
+          "run_id": "${{ github.run_id }}",
+          "start_time": "$START_TIME",
+          "end_time": "$END_TIME",
+          "duration_seconds": $DURATION,
+          "status": "${{ job.status }}",
+          "memory_usage_mb": $MEMORY_USAGE,
+          "date": "$(date -u +%%Y-%%m-%%d)",
+          "timestamp": "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)"
+        }
+        EOF
+        
+        echo "✅ 执行指标已保存到 metrics/workflow/%(workflow_type)s_%(id)s_$(date -u +%%Y%%m%%d).json"
+        
+        # 输出关键指标
+        echo "执行时间: $DURATION 秒"
+        echo "内存使用: $MEMORY_USAGE MB"
+        echo "状态: ${{ job.status }}"
+        
+        # 提交指标文件
+        if [ "${{ github.event_name }}" != "pull_request" ]; then
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add metrics/workflow/%(workflow_type)s_%(id)s_$(date -u +%%Y%%m%%d).json
+          git commit -m "📊 添加工作流执行指标: %(workflow_type)s_%(id)s" || echo "没有更改需要提交"
+          git pull --rebase origin main || echo "拉取失败，继续执行"
+          git push || echo "推送失败，但继续执行"
+        fi
+      ||| % {workflow_type: workflow_type, id: id}
+    },
+    
+  // 生成记录开始时间步骤
+  generateStartTimeStep()::
+    {
+      name: '记录开始时间',
+      id: 'setup_start',
+      run: |||
+        echo "start_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+      |||
+    },

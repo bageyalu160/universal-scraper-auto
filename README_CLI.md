@@ -31,7 +31,7 @@ python scripts/us.py [命令] [选项]
 python scripts/us.py generate --type all
 
 # 使用高级选项一次性生成所有工作流
-python scripts/us.py generate --type all --enhanced --cache enable --timeout 90 --error-strategy tolerant
+python scripts/us.py generate --type all --enhanced --cache enable --timeout 90 --error-strategy tolerant --concurrency group --schedule-mode smart
 
 # 为指定站点生成所有工作流
 python scripts/us.py generate --site pm001 --type all
@@ -76,7 +76,7 @@ python scripts/us.py crawl --site heimao
 
 ```bash
 # 仅执行分析阶段
-python scripts/us.py analyze --site pm001 --data ./data/daily/2025-05-27/pm001_data.json
+python scripts/us.py analyze --site pm001 --data ./data/daily/2025-05-30/pm001_data.json
 ```
 
 ### 仅发送通知
@@ -84,9 +84,9 @@ python scripts/us.py analyze --site pm001 --data ./data/daily/2025-05-27/pm001_d
 ```bash
 # 仅执行通知阶段
 python scripts/us.py notify --site pm001 \
-  --data ./data/daily/2025-05-27/pm001_data.json \
-  --analysis ./analysis/daily/2025-05-27/pm001_analysis.json \
-  --summary ./analysis/daily/2025-05-27/pm001_summary.md
+  --data ./data/daily/2025-05-30/pm001_data.json \
+  --analysis ./analysis/daily/2025-05-30/pm001_analysis.json \
+  --summary ./analysis/daily/2025-05-30/pm001_summary.md
 ```
 
 ## 全局选项
@@ -108,6 +108,12 @@ python scripts/us.py notify --site pm001 \
 - `--error-strategy {strict,tolerant}`: 错误处理策略
   - `strict`: 严格模式，任何错误都会导致工作流失败
   - `tolerant`: 宽松模式，允许部分错误，工作流继续执行
+- `--concurrency {group,cancel}`: 并发控制策略
+  - `group`: 按组控制并发，同组任务互斥
+  - `cancel`: 新任务取消旧任务
+- `--schedule-mode {fixed,smart}`: 调度模式
+  - `fixed`: 固定时间调度
+  - `smart`: 智能调度，根据历史执行情况自动优化
 
 ## 示例工作流
 
@@ -131,13 +137,13 @@ python scripts/us.py notify --site pm001 \
    python scripts/us.py scrape --site pm001
    
    # 再执行分析
-   python scripts/us.py analyze --site pm001 --data ./data/daily/2025-05-27/pm001_data.json
+   python scripts/us.py analyze --site pm001 --data ./data/daily/2025-05-30/pm001_data.json
    
    # 最后发送通知
    python scripts/us.py notify --site pm001 \
-     --data ./data/daily/2025-05-27/pm001_data.json \
-     --analysis ./analysis/daily/2025-05-27/pm001_analysis.json \
-     --summary ./analysis/daily/2025-05-27/pm001_summary.md
+     --data ./data/daily/2025-05-30/pm001_data.json \
+     --analysis ./analysis/daily/2025-05-30/pm001_analysis.json \
+     --summary ./analysis/daily/2025-05-30/pm001_summary.md
    ```
 
 ## 最佳实践
@@ -160,4 +166,26 @@ python scripts/us.py notify --site pm001 \
    - 对于大规模爬取任务，使用宽松模式提高成功率：
      ```bash
      python scripts/us.py generate --site heimao --error-strategy tolerant
+     ```
+
+4. **并发控制策略**：
+   - 对于资源密集型任务，使用分组并发控制避免资源竞争：
+     ```bash
+     python scripts/us.py generate --site pm001 --concurrency group
+     ```
+   - 对于需要保持最新数据的任务，使用取消策略：
+     ```bash
+     python scripts/us.py generate --site heimao --concurrency cancel
+     ```
+
+5. **智能调度优化**：
+   - 启用智能调度以优化执行时间和资源利用：
+     ```bash
+     python scripts/us.py generate --site pm001 --schedule-mode smart
+     ```
+
+6. **代理池配置**：
+   - 配置代理池以提高爬取成功率和防止IP封禁：
+     ```bash
+     python scripts/us.py run --site pm001 --proxy-pool enable --proxy-rotation auto
      ```

@@ -91,35 +91,62 @@ local workflow_env = utils.generateWorkflowEnv('analyzer', global_config);
       'continue-on-error': analyze_error_strategy['continue-on-error'],
       steps: [
         utils.generateCheckoutStep(),
+        utils.generateStartTimeStep(),
         utils.generatePythonSetupStep(params.runtime.python_version, true),
         utils.generateCacheStep(cache_config, '**/requirements.txt, config/sites/' + site_id + '.yaml'),
-        {
-          name: '安装依赖',
-          run: 'pip install ' + std.join(' ', dependencies)
-        },
+        utils.generateRetryableStep('安装依赖', 'pip install ' + std.join(' ', dependencies), 3, 10),
         utils.generateDirectorySetupStep(['analysis/' + site_id, 'analysis/' + site_id + '/cache']),
         {
-          name: '运行分析',
+          name: '准备分析环境',
+          id: 'prepare_analysis',
           env: {
             OPENAI_API_KEY: '${{ secrets.OPENAI_API_KEY }}',
             GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}',
             ANTHROPIC_API_KEY: '${{ secrets.ANTHROPIC_API_KEY }}'
           },
           run: |||
-            python scripts/ai_analyzer.py \
-              --site ${{ github.event.inputs.site_id }} \
-              --date "${{ github.event.inputs.data_date }}" \
-              --input ${{ github.event.inputs.data_file }} \
-              --output analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json \
-              --prompt-template %(prompt_template)s \
-              --provider %(ai_provider)s
-          ||| % {
-            prompt_template: prompt_template,
-            ai_provider: ai_provider
-          }
+            # 设置分析输出路径
+            echo "analysis_output=analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json" >> $GITHUB_OUTPUT
+            echo "analysis_success=false" >> $GITHUB_OUTPUT
+          |||
+        },
+        utils.generateRetryableStep('运行分析', |||
+          python scripts/ai_analyzer.py \
+            --site ${{ github.event.inputs.site_id }} \
+            --date "${{ github.event.inputs.data_date }}" \
+            --input ${{ github.event.inputs.data_file }} \
+            --output analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json \
+            --prompt-template %(prompt_template)s \
+            --provider %(ai_provider)s
+            
+          # 检查结果
+          if [ -f "analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json" ]; then
+            echo "✅ 分析成功完成"
+          else
+            echo "❌ 分析失败或无结果"
+            exit 1
+          fi
+        ||| % {
+          prompt_template: prompt_template,
+          ai_provider: ai_provider
+        }, 3, 30),
+        {
+          name: '检查分析结果',
+          id: 'check_analysis_result',
+          'if': "always()",
+          run: |||
+            if [ -f "analysis/${{ github.event.inputs.site_id }}/${{ github.event.inputs.site_id }}_${{ github.event.inputs.data_date }}_analysis.json" ]; then
+              echo "analysis_success=true" >> $GITHUB_OUTPUT
+              echo "✅ 分析成功完成"
+            else
+              echo "analysis_success=false" >> $GITHUB_OUTPUT
+              echo "❌ 分析失败或无结果"
+            fi
+          |||
         },
         {
           name: '上传分析结果',
+          'if': "steps.check_analysis_result.outputs.analysis_success == 'true'",
           uses: 'actions/upload-artifact@v4',
           with: {
             name: '${{ github.event.inputs.site_id }}-analysis-${{ github.event.inputs.data_date }}',
@@ -152,7 +179,13 @@ local workflow_env = utils.generateWorkflowEnv('analyzer', global_config);
           ||| % {site_id: site_id, site_name: site_name}
         },
         // 添加工作流状态报告
-        utils.generateWorkflowStatusStep('analyzer', site_id)
+        utils.generateWorkflowStatusStep('analyzer', site_id),
+        // 添加执行指标收集
+        utils.generateMetricsCollectionStep('analyzer', site_id),
+        // 添加智能调度分析
+        utils.generateSmartSchedulingStep('analyzer', site_id),
+        // 应用智能调度
+        utils.generateApplyScheduleStep('analyzer', site_id)
       ]
     }
   }

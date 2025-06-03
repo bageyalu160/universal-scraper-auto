@@ -1,0 +1,309 @@
+# 京东商品爬虫配置
+
+# 基本站点信息
+site:
+  name: "JD"
+  description: "京东电商平台商品数据采集"
+  base_url: "https://www.jd.com/"
+  output_filename: "jd_products_data.json"
+  encoding: "utf-8"
+
+# 爬取规则
+scraping:
+  # 爬虫引擎选择
+  engine: "playwright"  # 使用 Playwright 处理动态加载内容
+  
+  # 浏览器配置
+  browser:
+    type: "chromium"
+    headless: true
+    viewport:
+      width: 1280
+      height: 800
+    
+  # 分类目录配置
+  categories:
+    - id: "9987"
+      name: "手机"
+      subcategories:
+        - id: "653"
+          name: "手机通讯"
+          depth: 2
+    - id: "670"
+      name: "电脑办公"
+      subcategories:
+        - id: "671"
+          name: "电脑整机"
+          depth: 2
+    - id: "1320"
+      name: "家用电器"
+      subcategories:
+        - id: "12259"
+          name: "电视"
+          depth: 2
+  
+  # 商品列表配置
+  product_list:
+    items_per_page: 30
+    max_pages: 3
+    url_format: "https://list.jd.com/list.html?cat={cat_id}&page={page}"
+    
+  # 商品详情配置
+  product_detail:
+    max_products: 50  # 每个分类最多爬取的商品数量
+    
+  # 交互操作配置
+  interactions:
+    - type: "wait"
+      selector: ".gl-warp"
+      timeout: 5000
+    - type: "scroll"
+      distance: 800
+      interval: 500
+      count: 3
+      
+  # 时间范围设置
+  time_range:
+    days_limit: 7  # 只抓取最近7天更新的商品
+
+# 网络请求配置
+network:
+  # 重试设置
+  retry:
+    max_retries: 3
+    backoff_factor: 1.0
+    status_forcelist: [429, 500, 502, 503, 504]
+    
+  # 超时设置
+  timeout: 60  # 请求超时时间（秒）
+  
+  # 延迟设置
+  delay:
+    page_delay:
+      min: 3  # 最小延迟（秒）
+      max: 7  # 最大延迟（秒）
+    category_delay:
+      min: 5  # 最小延迟（秒）
+      max: 10  # 最大延迟（秒）
+      
+  # 代理设置
+  proxy:
+    enabled: true
+    rotation: "auto"
+    validation_url: "https://www.jd.com/"
+    max_failures: 3
+    
+  # 指纹伪装
+  fingerprint:
+    enabled: true
+    browser_profiles:
+      - name: "chrome_win10"
+        os: "Windows"
+        os_version: "10"
+        browser: "Chrome"
+        browser_version: "96.0.4664.110"
+      - name: "firefox_mac"
+        os: "MacOS"
+        os_version: "11.6"
+        browser: "Firefox"
+        browser_version: "95.0.2"
+        
+  # User-Agent配置
+  user_agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:95.0) Gecko/20100101 Firefox/95.0"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:95.0) Gecko/20100101 Firefox/95.0"
+
+# 解析配置
+parsing:
+  # 商品列表选择器
+  product_list_selector: ".gl-item"
+  
+  # 商品列表字段选择器
+  list_field_selectors:
+    product_id:
+      selector: ".gl-i-wrap"
+      attribute: "data-sku"
+    title:
+      selector: ".p-name em"
+      attribute: "text"
+    price:
+      selector: ".p-price i"
+      attribute: "text"
+    shop:
+      selector: ".p-shop a"
+      attribute: "text"
+    image:
+      selector: ".p-img img"
+      attribute: "data-lazy-img"
+      transform: "https:{value}"
+      
+  # 商品详情字段选择器
+  detail_field_selectors:
+    description:
+      selector: ".p-parameter"
+      attribute: "html"
+    brand:
+      selector: ".p-parameter-list li:contains('品牌')"
+      attribute: "text"
+      regex: "品牌：(.*)"
+    model:
+      selector: ".p-parameter-list li:contains('型号')"
+      attribute: "text"
+      regex: "型号：(.*)"
+    parameters:
+      selector: "#detail .parameter2"
+      attribute: "html"
+    comments_count:
+      selector: "#comment .count"
+      attribute: "text"
+    rating:
+      selector: ".percent-con"
+      attribute: "text"
+      
+  # 数据清洗规则
+  cleaning:
+    price:
+      type: "numeric"
+      remove: "¥,"
+    comments_count:
+      type: "numeric"
+      remove: "+万"
+      multiplier: 10000
+    rating:
+      type: "percentage"
+      
+  # 数据验证规则
+  validation:
+    required_fields: ["product_id", "title", "price"]
+    price_range:
+      min: 1
+      max: 100000
+
+# AI分析配置
+analysis:
+  # AI提供商
+  provider: "gemini"
+  
+  # 分析任务
+  tasks:
+    - name: "product_categorization"
+      description: "对商品进行细粒度分类"
+      prompt_template: "config/analysis/prompts/product_categorization.txt"
+      
+    - name: "price_analysis"
+      description: "分析商品价格区间和竞争情况"
+      prompt_template: "config/analysis/prompts/price_analysis.txt"
+      
+    - name: "trend_detection"
+      description: "检测热门商品和趋势"
+      prompt_template: "config/analysis/prompts/trend_detection.txt"
+      
+  # 输出格式
+  output_format: "json"
+  
+  # 分析参数
+  parameters:
+    temperature: 0.2
+    max_tokens: 2048
+    top_p: 0.95
+
+# 输出配置
+output:
+  # 输出格式
+  format: "json"
+  
+  # 输出目录
+  directory: "data/jd"
+  
+  # 输出文件命名模式
+  filename_pattern: "jd_products_{category}_{date}.json"
+  
+  # 输出字段
+  fields:
+    - "product_id"
+    - "category_id"
+    - "category_name"
+    - "title"
+    - "price"
+    - "shop"
+    - "brand"
+    - "model"
+    - "image"
+    - "description"
+    - "parameters"
+    - "comments_count"
+    - "rating"
+    - "url"
+    - "crawl_time"
+    
+  # 增量更新设置
+  incremental:
+    enabled: true
+    key_field: "product_id"
+    
+  # 数据压缩
+  compression:
+    enabled: true
+    algorithm: "gzip"
+    
+  # 数据分片
+  sharding:
+    enabled: true
+    max_records_per_file: 1000
+
+# 通知配置
+notification:
+  # 通知渠道
+  channels:
+    - type: "dingtalk"
+      webhook: "https://oapi.dingtalk.com/robot/send?access_token={TOKEN}"
+      secret: "{SECRET}"
+      
+    - type: "feishu"
+      webhook: "https://open.feishu.cn/open-apis/bot/v2/hook/{TOKEN}"
+      
+  # 通知触发条件
+  triggers:
+    - event: "crawl_complete"
+      message_template: "config/notification/templates/crawl_complete.txt"
+      
+    - event: "crawl_error"
+      message_template: "config/notification/templates/crawl_error.txt"
+      
+    - event: "analysis_complete"
+      message_template: "config/notification/templates/analysis_complete.txt"
+
+# 监控配置
+monitoring:
+  # 性能监控
+  performance:
+    enabled: true
+    metrics:
+      - "crawl_duration"
+      - "requests_per_minute"
+      - "success_rate"
+      - "memory_usage"
+      
+  # 错误监控
+  error_tracking:
+    enabled: true
+    max_errors: 100
+    
+  # 健康检查
+  health_check:
+    enabled: true
+    interval: 300  # 秒
+    endpoints:
+      - "https://www.jd.com/"
+      - "https://list.jd.com/"
+
+# 日志配置
+logging:
+  filename: "jd_scraper.log"
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(levelname)s - %(message)s"
+  rotation:
+    when: "midnight"
+    backup_count: 7

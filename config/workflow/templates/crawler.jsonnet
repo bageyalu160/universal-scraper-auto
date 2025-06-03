@@ -267,25 +267,22 @@ else
       },
       steps: [
         utils.generateCheckoutStep(),
+        utils.generateStartTimeStep(),
         utils.generatePythonSetupStep(params.runtime.python_version, true),
         utils.generateCacheStep(cache_config, 'requirements.txt'),
-        {
-          name: '安装依赖',
-          run: |||
-            python -m pip install --upgrade pip
-            if [ -f requirements.txt ]; then
-              pip install -r requirements.txt
-            else
-              echo "安装必要的依赖..."
-              pip install %(dependencies)s
-            fi
-          ||| % {dependencies: dependencies}
-        },
+        utils.generateRetryableStep('安装依赖', |||
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "安装必要的依赖..."
+            pip install %(dependencies)s
+          fi
+        ||| % {dependencies: dependencies}, 3, 10),
         utils.generateDirectorySetupStep(['data/' + site_id, 'status/' + site_id, 'logs']),
         {
           name: '运行爬虫',
           id: 'run_scraper',
-          'continue-on-error': true,
           env: {
             [env_var.name]: '${{ secrets.' + env_var.secret + ' }}'
             for env_var in env_vars
@@ -294,24 +291,46 @@ else
             echo "🕷️ 开始爬取数据: %(site_id)s"
             echo "📅 运行日期: $RUN_DATE"
             echo "🔄 使用代理: $USE_PROXY"
-            
-            # 构建命令参数
-            PROXY_ARG=""
-            if [ "$USE_PROXY" = "true" ] && [ -f "data/proxies/proxy_pool.json" ]; then
-              PROXY_ARG="--proxy-file data/proxies/proxy_pool.json"
-              echo "📋 使用代理池文件"
-            fi
-            
-            # 执行爬虫
-            python scripts/scraper.py \
-              --site %(site_id)s \
-              --date "$RUN_DATE" \
-              --output data/%(site_id)s/%(output_filename)s \
-              --status status/%(site_id)s/status.json \
-              --log-file logs/%(site_id)s_$RUN_DATE.log \
-              $PROXY_ARG
-            
-            # 检查结果
+          |||
+        },
+        {
+          name: '执行爬虫脚本',
+          id: 'execute_scraper',
+          run: |||
+            # 设置默认值
+            echo "scraper_success=false" >> $GITHUB_OUTPUT
+          |||
+        },
+        utils.generateRetryableStep('爬取数据', |||
+          # 构建命令参数
+          PROXY_ARG=""
+          if [ "$USE_PROXY" = "true" ] && [ -f "data/proxies/proxy_pool.json" ]; then
+            PROXY_ARG="--proxy-file data/proxies/proxy_pool.json"
+            echo "📋 使用代理池文件"
+          fi
+          
+          # 执行爬虫
+          python scripts/scraper.py \
+            --site %(site_id)s \
+            --date "$RUN_DATE" \
+            --output data/%(site_id)s/%(output_filename)s \
+            --status status/%(site_id)s/status.json \
+            --log-file logs/%(site_id)s_$RUN_DATE.log \
+            $PROXY_ARG
+          
+          # 检查结果
+          if [ -f "data/%(site_id)s/%(output_filename)s" ]; then
+            echo "✅ 爬虫执行成功"
+          else
+            echo "❌ 爬虫执行失败或无数据"
+            exit 1
+          fi
+        ||| % {site_id: site_id, output_filename: output_filename}, 3, 30),
+        {
+          name: '检查爬虫结果',
+          id: 'check_scraper_result',
+          'if': "always()",
+          run: |||
             if [ -f "data/%(site_id)s/%(output_filename)s" ]; then
               echo "scraper_success=true" >> $GITHUB_OUTPUT
               echo "✅ 爬虫执行成功"
@@ -319,14 +338,11 @@ else
               echo "scraper_success=false" >> $GITHUB_OUTPUT
               echo "❌ 爬虫执行失败或无数据"
             fi
-          ||| % {
-            site_id: site_id,
-            output_filename: output_filename
-          }
+          ||| % {site_id: site_id, output_filename: output_filename}
         },
         {
           name: '上传数据文件',
-          'if': "steps.run_scraper.outputs.scraper_success == 'true'",
+          'if': "steps.check_scraper_result.outputs.scraper_success == 'true'",
           uses: 'actions/upload-artifact@v4',
           with: {
             name: site_id + '-data-${{ needs.pre-check.outputs.run_date }}',
@@ -337,6 +353,7 @@ else
         },
         {
           name: '上传状态文件',
+          'if': "steps.check_scraper_result.outputs.scraper_success == 'true'",
           uses: 'actions/upload-artifact@v4',
           with: {
             name: site_id + '-status-${{ needs.pre-check.outputs.run_date }}',
@@ -380,7 +397,13 @@ else
           ||| % {site_id: site_id, site_name: site_name}
         },
         // 添加工作流状态报告
-        utils.generateWorkflowStatusStep('crawler', site_id)
+        utils.generateWorkflowStatusStep('crawler', site_id),
+        // 添加执行指标收集
+        utils.generateMetricsCollectionStep('crawler', site_id),
+        // 添加智能调度分析
+        utils.generateSmartSchedulingStep('crawler', site_id),
+        // 应用智能调度
+        utils.generateApplyScheduleStep('crawler', site_id)
       ]
     }
   }
