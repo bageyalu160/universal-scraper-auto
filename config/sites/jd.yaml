@@ -1,0 +1,545 @@
+site:
+  id: jd
+  name: 京东商城
+  base_url: https://www.jd.com
+
+browser:
+  engine: playwright
+  browser_type: chromium
+  headless: false
+  # 启用隐身模式
+  stealth: true
+  locale: zh-CN
+  timezone_id: "Asia/Shanghai"
+  color_scheme: light
+  # 使用真实用户的Chrome浏览器用户代理
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+  viewport:
+    width: 1920
+    height: 1080
+  # 增强浏览器指纹覆盖
+  fingerprint:
+    override: true
+    hardware_concurrency: 8
+    device_memory: 8
+    webgl_vendor: "Google Inc."
+    webgl_renderer: "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    platform: "Win32"
+    plugins_length: 5
+    languages: ["zh-CN", "zh", "en-US", "en"]
+    # 添加更多指纹属性
+    user_agent_data:
+      brands: [
+        {"brand": "Chromium", "version": "122"},
+        {"brand": "Not=A?Brand", "version": "24"},
+        {"brand": "Google Chrome", "version": "122"}
+      ]
+      mobile: false
+      platform: "Windows"
+    # 添加音频和视频设备信息
+    media_devices:
+      audio_input_devices: 2
+      video_input_devices: 1
+      audio_output_devices: 3
+  # 启用cookie和本地存储
+  cookies_enabled: true
+  persistent_storage: true
+  # 添加字体和屏幕配置
+  font_families: ["Arial", "Microsoft YaHei", "SimSun", "SimHei", "Tahoma", "Verdana"]
+  screen_size:
+    width: 1920
+    height: 1080
+    color_depth: 24
+    pixel_depth: 24
+    avail_width: 1920
+    avail_height: 1040
+    avail_left: 0
+    avail_top: 40
+  launch_args:
+    # 基本参数
+    - "--no-sandbox"
+    - "--disable-setuid-sandbox"
+    - "--disable-dev-shm-usage"
+    # 禁用自动化检测（最重要的反爬虫参数）
+    - "--disable-blink-features=AutomationControlled"
+    # 启用GPU加速（真实用户通常有GPU）
+    - "--enable-gpu"
+    - "--enable-webgl"
+    - "--ignore-gpu-blocklist"
+    # 启用音频（真实用户通常有音频）
+    - "--use-fake-ui-for-media-stream"
+    - "--use-fake-device-for-media-stream"
+    # 启用插件（真实用户通常有插件）
+    - "--enable-plugins"
+    # 启用JavaScript JIT
+    - "--js-flags=--jitless=false"
+    # 启用Canvas（避免指纹检测）
+    - "--enable-accelerated-2d-canvas"
+    # 设置语言和字体渲染
+    - "--lang=zh-CN"
+    - "--font-render-hinting=medium"
+    # 启用平滑滚动（真实用户体验）
+    - "--enable-smooth-scrolling"
+    # 设置默认编码
+    - "--default-encoding=UTF-8"
+    # 启用硬件加速
+    - "--enable-hardware-overlays"
+    # 禁用PDF查看器（避免指纹）
+    - "--disable-pdf-viewer"
+    # 禁用自动填充（避免指纹）
+    - "--disable-autofill-keyboard-accessory-view"
+    # 禁用后台计时器节流（真实用户行为）
+    - "--disable-background-timer-throttling"
+    # 禁用后台标签节流（真实用户行为）
+    - "--disable-backgrounding-occluded-windows"
+    # 禁用客户端提示（避免指纹）
+    - "--disable-client-side-phishing-detection"
+    # 禁用组件更新（避免指纹）
+    - "--disable-component-update"
+    # 禁用默认浏览器检查（避免指纹）
+    - "--disable-default-apps"
+    # 禁用提示（避免指纹）
+    - "--disable-infobars"
+    # 禁用登录提示（避免指纹）
+    - "--disable-prompt-on-repost"
+    # 禁用同步（避免登录提示）
+    - "--disable-sync"
+    # 禁用翻译提示
+    - "--disable-translate"
+    # 禁用安全浏览更新
+    - "--safebrowsing-disable-auto-update"
+    # 禁用首次运行体验
+    - "--no-first-run"
+    # 禁用站点隔离（可能导致指纹）
+    - "--disable-site-isolation-trials"
+    # 禁用域隔离（可能导致指纹）
+    - "--disable-features=IsolateOrigins,site-per-process"
+    - "--disable-gpu"
+    - "--disable-notifications"
+    - "--disable-popup-blocking"
+    - "--disable-background-timer-throttling"
+    - "--disable-backgrounding-occluded-windows"
+    - "--disable-breakpad"
+    - "--disable-component-extensions-with-background-pages"
+    - "--disable-features=TranslateUI,BlinkGenPropertyTrees"
+    - "--disable-ipc-flooding-protection"
+    - "--disable-renderer-backgrounding"
+    - "--enable-features=NetworkService,NetworkServiceInProcess"
+    - "--force-color-profile=srgb"
+    - "--password-store=basic"
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+  viewport:
+    width: 1366
+    height: 768
+  cookies_enabled: false
+  local_storage_enabled: false
+  session_storage_enabled: false
+  geolocation_enabled: false
+  webgl_enabled: false
+  webgl_vendor_override: "Intel Inc."
+  webgl_renderer_override: "Intel Iris OpenGL Engine"
+  navigator_platform_override: "Win32"
+  navigator_vendor_override: "Google Inc."
+  hardware_concurrency: 4
+  device_memory: 8
+  timezone_id: "Asia/Shanghai"
+
+network:
+  timeout: 60000
+  retry:
+    max_retries: 5
+    retry_delay: 5000
+    backoff_factor: 2.0
+  delay:
+    page_delay:
+      min: 5
+      max: 12
+    category_delay:
+      min: 8
+      max: 15
+    request_delay:
+      min: 3
+      max: 8
+  proxy:
+    enable: true  # 启用代理
+    type: http
+    rotation: true
+    rotation_interval: 2
+    test_url: "https://www.jd.com"
+    test_timeout: 5000
+    providers:
+      - type: custom
+        urls:
+          - http://127.0.0.1:7890
+          - http://127.0.0.1:7891
+          - http://127.0.0.1:7892
+      - type: zhima
+        api_url: "http://webapi.zhimaruanjian.com/getip?num=1&type=2&pro=&city=0&yys=0&port=1&pack=0&ts=1&ys=0&cs=1&lb=1&sb=0&pb=4&mr=1&regions="
+        username: "username"
+        password: "password"
+      - type: custom_api
+        api_url: "http://api.proxy.provider/get?count=5"
+        response_format: "json"
+        ip_field: "ip"
+        port_field: "port"
+        username_field: "username"
+        password_field: "password"
+  headers:
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+    Accept-Encoding: "gzip, deflate, br"
+    Accept-Language: "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6"
+    Cache-Control: "max-age=0"
+    Connection: "keep-alive"
+    Sec-Ch-Ua: '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"'
+    Sec-Ch-Ua-Mobile: "?0"
+    Sec-Ch-Ua-Platform: '"Windows"'
+    Sec-Fetch-Dest: "document"
+    Sec-Fetch-Mode: "navigate"
+    Sec-Fetch-Site: "same-origin"
+    Sec-Fetch-User: "?1"
+    Upgrade-Insecure-Requests: "1"
+  # 添加随机请求头
+  random_headers:
+    enabled: true
+    headers:
+      - name: "Referer"
+        values:
+          - "https://www.baidu.com/s?wd=%E4%BA%AC%E4%B8%9C%E6%89%8B%E6%9C%BA"
+          - "https://www.google.com/search?q=%E4%BA%AC%E4%B8%9C%E6%89%8B%E6%9C%BA"
+          - "https://www.jd.com/"
+          - "https://www.jd.com/allSort.aspx"
+      - name: "X-Forwarded-For"
+        values:
+          - "58.247.214.{random:1-254}"
+          - "123.125.71.{random:1-254}"
+          - "220.181.108.{random:1-254}"
+      - name: "X-Real-IP"
+        values:
+          - "58.247.214.{random:1-254}"
+          - "123.125.71.{random:1-254}"
+          - "220.181.108.{random:1-254}"
+
+captcha:
+  enable: true
+  provider: 2captcha
+  api_key: "YOUR_API_KEY"
+  timeout: 60000
+  retry_count: 3
+  types:
+    - type: image
+      selector: "img.captcha-img"
+    - type: slider
+      selector: ".JDJRV-suspend-slide"
+      handle_selector: ".JDJRV-slide-btn"
+    - type: click
+      selector: ".verify-box"
+  fallback:
+    enable: true
+    action: "wait"
+    duration: 300000
+
+scraping:
+  categories:
+    - id: 手机
+      name: 手机
+      subcategories:
+        - id: 小米手机
+          name: 小米手机
+          depth: 1
+  product_list:
+    url_format: https://search.jd.com/Search?keyword={cat_id}&enc=utf-8&wq={cat_id}&pvid=6cee6a7e5c4e42d9a084f8afd9a4712c&psort=3&click=1
+    max_pages: 1
+    items_per_page: 30
+    referrer: "https://www.jd.com/"
+  interactions:
+    # 初始化：等待页面完全加载并模拟用户初始行为
+    - type: wait
+      time: 5000
+    # 模拟用户随机移动鼠标
+    - type: evaluate
+      script: |
+        (() => {
+          // 创建真实的鼠标轨迹
+          const generatePath = (startX, startY, endX, endY, steps) => {
+            const path = [];
+            // 添加一些随机性和曲线
+            const randStrength = Math.random() * 0.25 + 0.1;
+            const randPoint = Math.random() * 0.2 - 0.1;
+            const controlX = startX + (endX - startX) * 0.5 + (endX - startX) * randPoint;
+            const controlY = startY + (endY - startY) * 0.5 + (endY - startY) * randStrength;
+            
+            for (let i = 0; i <= steps; i++) {
+              const t = i / steps;
+              // 二次贝塞尔曲线
+              const x = Math.pow(1-t, 2) * startX + 2 * (1-t) * t * controlX + Math.pow(t, 2) * endX;
+              const y = Math.pow(1-t, 2) * startY + 2 * (1-t) * t * controlY + Math.pow(t, 2) * endY;
+              path.push({x: Math.round(x), y: Math.round(y)});
+            }
+            return path;
+          };
+          
+          // 执行鼠标移动
+          const moveMouseAlongPath = (path, index = 0) => {
+            if (index >= path.length) return;
+            
+            const point = path[index];
+            const event = new MouseEvent('mousemove', {
+              view: window,
+              bubbles: true,
+              cancelable: true,
+              clientX: point.x,
+              clientY: point.y
+            });
+            document.dispatchEvent(event);
+            
+            // 随机化移动速度
+            const delay = Math.random() * 10 + 5;
+            setTimeout(() => moveMouseAlongPath(path, index + 1), delay);
+          };
+          
+          // 生成5个随机移动
+          for (let i = 0; i < 5; i++) {
+            setTimeout(() => {
+              const startX = Math.floor(Math.random() * window.innerWidth);
+              const startY = Math.floor(Math.random() * window.innerHeight);
+              const endX = Math.floor(Math.random() * window.innerWidth);
+              const endY = Math.floor(Math.random() * window.innerHeight);
+              const steps = Math.floor(Math.random() * 20) + 10;
+              
+              const path = generatePath(startX, startY, endX, endY, steps);
+              moveMouseAlongPath(path);
+            }, i * 1000);
+          }
+          
+          // 模拟用户查看页面元素
+          setTimeout(() => {
+            const elements = document.querySelectorAll('a, button, img');
+            if (elements.length > 0) {
+              const randomElement = elements[Math.floor(Math.random() * elements.length)];
+              const rect = randomElement.getBoundingClientRect();
+              const centerX = rect.left + rect.width / 2;
+              const centerY = rect.top + rect.height / 2;
+              
+              // 移动到元素上
+              const startX = Math.floor(Math.random() * window.innerWidth);
+              const startY = Math.floor(Math.random() * window.innerHeight);
+              const path = generatePath(startX, startY, centerX, centerY, 15);
+              moveMouseAlongPath(path);
+            }
+          }, 3000);
+        })();
+    # 等待鼠标移动完成
+    - type: wait
+      time: 2000
+    # 模拟用户随机滚动行为
+    - type: evaluate
+      script: |
+        (() => {
+          // 模拟真实的滚动行为
+          const smoothScroll = () => {
+            const maxScrolls = Math.floor(Math.random() * 5) + 3;
+            let currentScroll = 0;
+            
+            const scroll = () => {
+              if (currentScroll >= maxScrolls) return;
+              
+              // 随机滚动距离和方向
+              const distance = Math.floor(Math.random() * 300) + 100;
+              const direction = Math.random() > 0.2 ? 1 : -1; // 大部分向下滚动，偶尔向上
+              
+              // 平滑滚动
+              const steps = Math.floor(Math.random() * 10) + 10;
+              const scrollPerStep = distance / steps;
+              
+              let currentStep = 0;
+              const doScroll = () => {
+                if (currentStep >= steps) {
+                  currentScroll++;
+                  // 随机暂停一段时间再继续滚动
+                  setTimeout(scroll, Math.random() * 1000 + 500);
+                  return;
+                }
+                
+                window.scrollBy(0, scrollPerStep * direction);
+                currentStep++;
+                setTimeout(doScroll, Math.random() * 30 + 10);
+              };
+              
+              doScroll();
+            };
+            
+            scroll();
+          };
+          
+          smoothScroll();
+        })();
+    # 等待滚动完成
+    - type: wait
+      time: 3000
+    # 模拟用户点击行为（但不实际点击，只是移动鼠标）
+    - type: evaluate
+      script: |
+        (() => {
+          // 找到所有产品项
+          const productItems = document.querySelectorAll('.gl-item');
+          if (productItems.length > 0) {
+            // 随机选择一个产品
+            const randomIndex = Math.floor(Math.random() * productItems.length);
+            const product = productItems[randomIndex];
+            
+            // 获取产品位置
+            const rect = product.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            
+            // 创建鼠标移动事件
+            const moveEvent = new MouseEvent('mousemove', {
+              view: window,
+              bubbles: true,
+              cancelable: true,
+              clientX: centerX,
+              clientY: centerY
+            });
+            
+            // 创建鼠标悬停事件
+            const overEvent = new MouseEvent('mouseover', {
+              view: window,
+              bubbles: true,
+              cancelable: true,
+              clientX: centerX,
+              clientY: centerY
+            });
+            
+            // 分发事件
+            document.dispatchEvent(moveEvent);
+            product.dispatchEvent(overEvent);
+            
+            // 模拟用户查看产品
+            console.log('用户正在查看产品:', product.textContent.trim().substring(0, 50) + '...');
+          }
+        })();
+    - type: wait
+      time: 2000
+    - type: scroll
+      direction: down
+      distance: 300
+      delay: 800
+      count: 1
+    - type: wait
+      time: 1500
+    - type: scroll
+      direction: down
+      distance: 400
+      delay: 600
+      count: 1
+    - type: wait
+      time: 3000
+    # 随机点击某个区域然后返回
+    - type: evaluate
+      script: |
+        (() => {
+          // 模拟用户随机点击行为
+          const links = Array.from(document.querySelectorAll('a'));
+          if (links.length > 0) {
+            const randomIndex = Math.floor(Math.random() * Math.min(5, links.length));
+            const link = links[randomIndex];
+            // 记录链接位置，但不实际点击
+            console.log('Would click:', link.href);
+            // 模拟鼠标悬停
+            const rect = link.getBoundingClientRect();
+            const x = rect.left + rect.width / 2;
+            const y = rect.top + rect.height / 2;
+            const hoverEvent = new MouseEvent('mouseover', {
+              view: window,
+              bubbles: true,
+              cancelable: true,
+              clientX: x,
+              clientY: y
+            });
+            link.dispatchEvent(hoverEvent);
+          }
+        })();
+    - type: wait
+      time: 2500
+
+parsing:
+  product_list_selector: ".gl-warp .gl-item"
+  list_field_selectors:
+    title:
+      selector: ".p-name em"
+      attribute: "innerText"
+    price:
+      selector: ".p-price i"
+      attribute: "innerText"
+    shop:
+      selector: ".p-shop"
+      attribute: "innerText"
+    comment_count:
+      selector: ".p-commit strong a"
+      attribute: "innerText"
+  product_selectors:
+    id:
+      selector: "[data-sku]"
+      attribute: "data-sku"
+    title:
+      selector: ".p-name em"
+      text: true
+    price:
+      selector: ".p-price i"
+      text: true
+    shop:
+      selector: ".p-shop a"
+      text: true
+    image:
+      selector: ".p-img img"
+      attribute: "data-lazy-img"
+    url:
+      selector: ".p-img a"
+      attribute: "href"
+      prefix: "https:"
+    comments:
+      selector: ".p-commit a"
+      text: true
+    promotion:
+      selector: ".p-icons .goods-icons"
+      text: true
+      multiple: true
+
+cleaning:
+  rules:
+    price:
+      type: "regex"
+      pattern: "[^0-9.]"
+      replacement: ""
+    comments:
+      type: "regex"
+      pattern: "[^0-9.万+]"
+      replacement: ""
+    url:
+      type: "replace"
+      old: "//"
+      new: "https://"
+      count: 1
+    title:
+      type: "strip"
+    promotion:
+      type: "join"
+      separator: ","
+  validation:
+    required_fields:
+      - title
+      - price
+      - id
+
+output:
+  format: json
+  directory: data/jd
+  filename: "jd_products_{timestamp}.json"
+  timestamp_format: "%Y%m%d_%H%M%S"
+  pretty_print: true
+  include_metadata: true
+  metadata:
+    source: "京东商城"
+    scraper_version: "1.0.0"
+    query: "华为手机"
+  encoding: "utf-8"

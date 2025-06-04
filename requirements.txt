@@ -6,9 +6,12 @@ lxml>=4.9.3
 pandas>=2.0.3
 tqdm>=4.66.1
 python-dotenv>=1.0.0
+pydantic>=2.0.0  # 数据验证和配置管理
 
 # 爬虫引擎依赖
 playwright>=1.41.0  # 浏览器自动化
+playwright-stealth>=1.0.5  # 浏览器指纹伪装
+2captcha-python>=1.2.0  # 验证码自动处理
 firecrawl-py>=1.0.0  # Firecrawl Python SDK
 
 # AI分析依赖

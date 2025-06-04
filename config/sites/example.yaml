@@ -1,0 +1,115 @@
+# 示例站点配置文件
+site:
+  id: example
+  name: 示例站点
+  base_url: https://example.com
+
+browser:
+  type: chromium  # 浏览器类型: chromium, firefox, webkit
+  headless: false  # 是否使用无头模式
+  viewport:
+    width: 1280
+    height: 800
+  user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36
+  locale: zh-CN
+  timezone: Asia/Shanghai
+  color_scheme: dark  # light, dark, no-preference
+  stealth: true  # 是否启用浏览器指纹伪装
+  launch_args:
+    - --disable-blink-features=AutomationControlled
+    - --disable-features=IsolateOrigins,site-per-process
+
+proxy:
+  enable: false  # 是否启用代理
+  type: http  # 代理类型: http, socks5
+  host: 127.0.0.1
+  port: 8080
+  username: user  # 可选
+  password: pass  # 可选
+  rotation:
+    enable: false  # 是否启用代理轮换
+    interval: 10  # 轮换间隔(分钟)
+
+captcha:
+  enable: true  # 是否启用验证码自动处理
+  provider: 2captcha  # 验证码服务提供商: 2captcha, anticaptcha
+  api_key: your_api_key_here
+  timeout: 120  # 验证码处理超时时间(秒)
+  manual_fallback: true  # 自动处理失败时是否允许手动处理
+
+logging:
+  level: INFO  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  file: logs/example.log  # 日志文件路径
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"  # 日志格式
+
+network:
+  timeout: 30  # 网络请求超时时间(秒)
+  retry:
+    max_retries: 3  # 最大重试次数
+    backoff_factor: 2.0  # 退避因子
+  delay:
+    page_delay:  # 页面间延迟
+      min: 1.0  # 最小延迟(秒)
+      max: 3.0  # 最大延迟(秒)
+    category_delay:  # 分类间延迟
+      min: 3.0
+      max: 5.0
+
+scraping:
+  categories:
+    - id: cat1
+      name: 分类1
+      subcategories:
+        - id: subcat1
+          name: 子分类1
+          depth: 1
+  product_list:
+    url_format: "https://example.com/list?cat_id={cat_id}&page={page}"
+    items_per_page: 30
+    max_pages: 3
+  product_detail:
+    max_products: 10
+  interactions:
+    - type: wait
+      duration: 2000  # 毫秒
+    - type: click
+      selector: ".accept-cookies"
+      wait_after: 1000
+
+parsing:
+  product_list_selector: ".product-item"
+  list_field_selectors:
+    id:
+      selector: ".product-id"
+      attribute: text
+      transform: strip
+    name:
+      selector: ".product-name"
+      attribute: text
+    price:
+      selector: ".product-price"
+      attribute: text
+      regex: "\\d+\\.\\d+"
+      transform: numeric
+    url:
+      selector: "a"
+      attribute: href
+  cleaning:
+    name:
+      remove: "\n\t\r"
+    price:
+      type: numeric
+      multiplier: 1.0
+  validation:
+    required_fields:
+      - id
+      - name
+      - url
+    price_range:
+      min: 0
+      max: 10000
+
+output:
+  format: json  # 输出格式: json, csv, tsv
+  directory: data/example
+  filename_pattern: "{site_id}_{timestamp}.{ext}"

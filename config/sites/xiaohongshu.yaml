@@ -1,0 +1,290 @@
+# 站点信息
+site:
+  name: "小红书"
+  description: "小红书探索页面爬虫"
+  base_url: "https://www.xiaohongshu.com/"
+  version: "1.0.0"
+
+# 自定义爬虫配置
+scraping:
+  engine: "custom"
+  custom_module: "src.scrapers.xiaohongshu_scraper"
+  custom_function: "scrape_xiaohongshu"
+
+# 浏览器配置
+browser:
+  type: chromium
+  headless: false
+  stealth: true
+  viewport:
+    width: 1920
+    height: 1080
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+  locale: "zh-CN"
+  timezone_id: "Asia/Shanghai"
+  color_scheme: "light"
+  
+  # 浏览器指纹伪装
+  hardware_concurrency: 8
+  device_memory: 8
+  webgl_vendor: "Google Inc. (Intel)"
+  webgl_renderer: "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)"
+  platform: "Win32"
+  plugins_count: 3
+  languages: ["zh-CN", "zh", "en-US", "en"]
+  
+  # 用户代理数据
+  user_agent_data:
+    brands:
+      - brand: "Chromium"
+        version: "122"
+      - brand: "Not=A?Brand"
+        version: "24"
+      - brand: "Google Chrome"
+        version: "122"
+    mobile: false
+    platform: "Windows"
+  
+  # 媒体设备信息
+  media_devices:
+    audio_input_count: 1
+    audio_output_count: 1
+    video_input_count: 1
+  
+  # 存储配置
+  persistent_storage: true
+  cookies_enabled: true
+  
+  # 屏幕配置
+  screen:
+    width: 1920
+    height: 1080
+    color_depth: 24
+    device_scale_factor: 1
+  
+  # 字体配置
+  fonts:
+    - "Arial"
+    - "Microsoft YaHei"
+    - "SimSun"
+    - "SimHei"
+    - "PingFang SC"
+  
+  # 启动参数
+  launch_args:
+    # 禁用自动化检测
+    - "--disable-blink-features=AutomationControlled"
+    - "--disable-features=AutomationControlled"
+    
+    # 启用GPU和WebGL
+    - "--use-gl=desktop"
+    - "--enable-gpu-rasterization"
+    - "--enable-zero-copy"
+    - "--enable-webgl"
+    - "--enable-webgl2"
+    
+    # 启用音频
+    - "--use-fake-ui-for-media-stream"
+    - "--use-fake-device-for-media-stream"
+    
+    # 启用扩展和插件
+    - "--enable-extensions"
+    - "--enable-plugins"
+    
+    # 启用平滑滚动
+    - "--enable-smooth-scrolling"
+    
+    # 禁用指纹识别
+    - "--disable-site-isolation-trials"
+    - "--disable-web-security"
+    - "--disable-features=IsolateOrigins,site-per-process"
+    
+    # 其他性能优化
+    - "--disable-dev-shm-usage"
+    - "--no-sandbox"
+    - "--disable-setuid-sandbox"
+    - "--ignore-certificate-errors"
+    - "--disable-accelerated-2d-canvas"
+    - "--no-first-run"
+    - "--no-default-browser-check"
+    - "--disable-infobars"
+    - "--disable-notifications"
+    - "--disable-popup-blocking"
+    - "--disable-save-password-bubble"
+    - "--disable-translate"
+    - "--disable-background-timer-throttling"
+    - "--disable-backgrounding-occluded-windows"
+    - "--disable-breakpad"
+    - "--disable-component-extensions-with-background-pages"
+    - "--disable-features=TranslateUI,BlinkGenPropertyTrees"
+    - "--disable-ipc-flooding-protection"
+    - "--disable-renderer-backgrounding"
+    - "--disable-sync"
+    - "--force-color-profile=srgb"
+    - "--metrics-recording-only"
+    - "--mute-audio"
+
+# 网络配置
+network:
+  timeout: 30
+  retry: 3
+  backoff_factor: 2
+  retry_codes: [408, 429, 500, 502, 503, 504]
+  delay:
+    min: 1000
+    max: 3000
+  
+  # 请求头配置
+  headers:
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+    Accept-Encoding: "gzip, deflate, br"
+    Accept-Language: "zh-CN,zh;q=0.9,en;q=0.8"
+    Cache-Control: "max-age=0"
+    Connection: "keep-alive"
+    Sec-CH-UA: '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"'
+    Sec-CH-UA-Mobile: "?0"
+    Sec-CH-UA-Platform: '"Windows"'
+    Sec-Fetch-Dest: "document"
+    Sec-Fetch-Mode: "navigate"
+    Sec-Fetch-Site: "none"
+    Sec-Fetch-User: "?1"
+    Upgrade-Insecure-Requests: "1"
+    
+    # 随机请求头
+    random:
+      - name: "X-Forwarded-For"
+        values:
+          - "58.34.56.#{random.number(1, 254)}"
+          - "60.191.#{random.number(1, 254)}.#{random.number(1, 254)}"
+          - "111.13.#{random.number(1, 254)}.#{random.number(1, 254)}"
+          - "121.226.#{random.number(1, 254)}.#{random.number(1, 254)}"
+          - "180.101.#{random.number(1, 254)}.#{random.number(1, 254)}"
+      - name: "X-Real-IP"
+        values:
+          - "58.34.56.#{random.number(1, 254)}"
+          - "60.191.#{random.number(1, 254)}.#{random.number(1, 254)}"
+          - "111.13.#{random.number(1, 254)}.#{random.number(1, 254)}"
+          - "121.226.#{random.number(1, 254)}.#{random.number(1, 254)}"
+          - "180.101.#{random.number(1, 254)}.#{random.number(1, 254)}"
+
+# 代理配置
+proxy:
+  enabled: false
+  server: ""
+  username: ""
+  password: ""
+  rotation:
+    enabled: false
+    interval: 5
+    providers:
+      - type: file
+        path: "proxies.txt"
+      - type: api
+        url: ""
+        format: "json"
+        field: "proxy"
+    test_urls:
+      - "https://www.xiaohongshu.com"
+      - "https://www.baidu.com"
+
+# 验证码配置
+captcha:
+  enabled: true
+  provider: "2captcha"
+  api_key: ""
+  types:
+    - image
+    - slider
+    - click
+  fallback: "wait"
+  max_wait: 300
+
+# 爬取配置
+crawl:
+  # 入口页面
+  entry_url: "https://www.xiaohongshu.com/explore"
+  
+  # 分类页面配置
+  categories:
+    - name: "探索页"
+      url: "https://www.xiaohongshu.com/explore"
+      
+      # 页面交互操作
+      interactions:
+        - type: "wait"
+          time: 3000
+          description: "等待页面加载"
+        
+        - type: "scroll"
+          distance: 300
+          delay: 100
+          count: 5
+          description: "滚动页面加载更多内容"
+          
+        - type: "wait"
+          time: 2000
+          description: "等待加载更多内容"
+          
+        - type: "execute_script"
+          script: "window.scrollBy(0, 500)"
+          description: "继续滚动页面"
+          
+        - type: "wait"
+          time: 2000
+          description: "再次等待内容加载"
+      
+      # 数据提取选择器
+      selectors:
+        list: ".note-item"
+        item:
+          title: ".note-info .title"
+          user: ".user-info .user-name"
+          likes: ".like-wrapper .count"
+          image: ".cover-item img"
+          link: ".note-item"
+          
+      # 翻页配置
+      pagination:
+        type: "scroll"
+        max_pages: 5
+        scroll_delay: 2000
+        load_more_selector: ".note-item"
+        
+  # 详情页配置
+  detail:
+    enabled: true
+    selectors:
+      title: ".note-content .title"
+      content: ".note-content .content"
+      user: ".user-info .name"
+      publish_time: ".publish-time"
+      likes: ".operation-wrapper .like .count"
+      comments: ".operation-wrapper .comment .count"
+      favorites: ".operation-wrapper .collect .count"
+      images: ".carousel-container img"
+    
+    # 详情页交互操作
+    interactions:
+      - type: "wait"
+        time: 3000
+        description: "等待详情页加载"
+        
+      - type: "scroll"
+        distance: 300
+        delay: 100
+        count: 3
+        description: "滚动查看完整内容"
+
+# 输出配置
+output:
+  format: "json"
+  path: "data/xiaohongshu"
+  filename: "xiaohongshu_#{date.now('yyyyMMdd_HHmmss')}.json"
+  fields:
+    - title
+    - user
+    - likes
+    - content
+    - publish_time
+    - images
+    - link

@@ -29,6 +29,9 @@
 - **代理池与反爬**：内置 IP 轮换、指纹伪装、验证码处理
 - **多渠道通知**：钉钉、企业微信、飞书等，支持富文本内容
 - **可视化监控**：GitHub Pages 仪表盘
+- **增强的浏览器指纹伪装**：集成 playwright-stealth 提供更强的反检测能力
+- **自动验证码处理**：集成 2captcha-python 自动处理 reCAPTCHA、hCaptcha 和图片验证码
+- **强大的配置验证**：使用 Pydantic 进行 YAML 配置验证和类型转换
 
 ---
 
@@ -67,6 +70,45 @@ playwright install --with-deps
 ---
 
 ## 4. 快速上手
+
+### 4.1 使用重构后的 PlaywrightScraper
+
+重构后的 PlaywrightScraper 类集成了多种先进特性，包括浏览器指纹伪装、验证码自动处理和基于 Pydantic 的配置验证。
+
+```bash
+# 安装依赖
+pip install -r requirements.txt
+
+# 使用示例爬虫脚本
+python3 scripts/example_scraper.py --config config/sites/example.yaml
+
+# 可选参数
+--headless         # 启用无头模式
+--no-stealth       # 禁用浏览器指纹伪装
+--no-captcha       # 禁用验证码自动处理
+--max-pages N      # 设置最大爬取页数
+--max-products N   # 设置最大爬取商品数
+--proxy URL        # 设置代理地址 (http://user:pass@host:port)
+```
+
+### 4.2 验证码处理
+
+重构后的 PlaywrightScraper 支持三种验证码类型的自动处理：
+
+1. **reCAPTCHA** - Google 的 reCAPTCHA v2/v3
+2. **hCaptcha** - hCaptcha 验证码
+3. **图片验证码** - 传统的图片识别验证码
+
+要使用验证码自动处理功能，需要在配置文件中设置有效的 2captcha API 密钥：
+
+```yaml
+captcha:
+  enable: true
+  provider: 2captcha
+  api_key: your_api_key_here
+  timeout: 120
+  manual_fallback: true
+```
 
 ### 4.1 创建站点配置
 
