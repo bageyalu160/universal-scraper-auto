@@ -1,5 +1,4 @@
 {
-  "status": "success",
-  "count": 5959,
-  "output_path": "data/daily/2026-01-22/pm001_recent_posts_2026-01-22.tsv"
+  "status": "warning",
+  "count": 0
 }
