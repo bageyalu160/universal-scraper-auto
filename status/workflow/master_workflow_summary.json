@@ -1,10 +1,10 @@
 {
-  "workflow_id": "21324588876",
+  "workflow_id": "21342977963",
   "trigger": "schedule",
   "action": "定时任务",
-  "date": "2026-01-25",
+  "date": "2026-01-26",
   "sites": ["advanced_antidetect","heimao","jd","jd_products","pm001","xiaohongshu"],
-  "timestamp": "2026-01-25T01:11:55Z",
+  "timestamp": "2026-01-26T01:10:29Z",
   "results": {
     "setup": "success",
     "proxy_pool": "success",
@@ -12,5 +12,5 @@
     "analyze": "skipped",
     "dashboard": "failure"
   },
-  "url": "https://github.com/bageyalu160/universal-scraper-auto/actions/runs/21324588876"
+  "url": "https://github.com/bageyalu160/universal-scraper-auto/actions/runs/21342977963"
 }
